@@ -1,0 +1,31 @@
+{
+ "format": 1,
+ "id": "zelda",
+ "name": "Zelda",
+ "games": [
+  {
+   "id": "oot",
+   "title": "The Legend of Zelda - Ocarina of Time Remake",
+   "launch": "games/oot/launch.sh",
+   "art": "games/oot/art"
+  },
+  {
+   "id": "wwhd",
+   "title": "The Legend of Zelda: The Wind Waker HD",
+   "launch": "games/wwhd/launch.sh",
+   "art": "games/wwhd/art"
+  },
+  {
+   "id": "dusklight",
+   "title": "Dusklight",
+   "launch": "games/dusklight/launch.sh",
+   "art": "games/dusklight/art"
+  },
+  {
+   "id": "totk",
+   "title": "The Legend of Zelda: Tears of the Kingdom (PC Recomp)",
+   "launch": "games/totk/launch.sh",
+   "art": "games/totk/art"
+  }
+ ]
+}
