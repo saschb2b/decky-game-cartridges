@@ -84,7 +84,8 @@ class FakeSteam:
 
     def __init__(self, agent, folders):
         self.agent = agent
-        self.folders = folders  # [{index, path, mounted, label}]
+        self.folders = folders
+        self.refuse = False  # [{index, path, mounted, label}]
         self.calls = []
 
     def eval(self, js):
@@ -100,12 +101,12 @@ class FakeSteam:
             index, label = js[js.index("(") + 1:-1].split(", ", 1)
             next(f for f in self.folders if f["index"] == int(index))["label"] = json.loads(label)
             return None
-        if js.startswith("SteamClient.InstallFolder.RemoveInstallFolder("):
-            index = int(js[js.index("(") + 1:-1])
-            self.folders = [f for f in self.folders if f["index"] != index or f["mounted"]]
-            return None
-        if js == "SteamClient.InstallFolder.RefreshFolders()":
-            return None
+        if js.startswith(self.agent.JS_REMOVE_FOLDER.split("{index}")[0].replace("{{", "{")):
+            index = int(js.split("RemoveInstallFolder(", 1)[1].split(")", 1)[0])
+            if self.refuse:
+                return False
+            self.folders = [f for f in self.folders if f["index"] != index]
+            return True
         raise AssertionError(js)
 
 
@@ -131,12 +132,23 @@ def test_cartridge_steam_library_follows_the_cartridge(agent, tmp_path, monkeypa
     assert agent.sync_libraries(steam, state, wanted)
     assert len(steam.folders) == 2
 
-    # Unplugged: Steam first still reports the folder as mounted, then not; then it is removed.
+    # Unplugged: the folder is gone from disk, Steam drops it when asked. If it does not, the next check retries.
     (cart / "SteamLibrary").rmdir()
     assert not agent._libraries_in_sync(state, {})
+    steam.refuse = True
     assert not agent.sync_libraries(steam, state, {})
     assert len(steam.folders) == 2 and library in state["libraries"]
-    steam.folders[1]["mounted"] = False
+    steam.refuse = False
     assert agent.sync_libraries(steam, state, {})
     assert [f["index"] for f in steam.folders] == [0]
     assert state["libraries"] == {}
+
+
+def test_a_library_still_on_disk_is_never_removed(agent, tmp_path, monkeypatch):
+    monkeypatch.setattr(agent, "save_state", lambda state: None)
+    library = tmp_path / "Old" / "SteamLibrary"
+    library.mkdir(parents=True)
+    steam = FakeSteam(agent, [{"index": 3, "path": str(library), "mounted": True, "label": "Old"}])
+    state = {"libraries": {str(library): {"cartridge": "old", "label": "Old"}}}
+    assert agent.sync_libraries(steam, state, {})
+    assert len(steam.folders) == 1 and state["libraries"] == {}

@@ -156,6 +156,7 @@ async function folderFor(target: Cartridge, state: State) {
 // ---- Steam's own move, shown like the plugin's transfers ----------------------------------------------------
 
 let move: (Job & { finishedAt?: number }) | null = null;
+let stopWatching: (() => void) | null = null;
 const listeners = new Set<() => void>();
 
 function setMove(next: typeof move) {
@@ -192,27 +193,47 @@ export async function moveSteamGame(game: Game, from: Cartridge, to: Cartridge, 
   };
   setMove(base);
   let last = { at: Date.now(), done: 0 };
-  const finish = (fields: Partial<Job>) => {
-    registration?.unregister?.();
-    setMove({ ...move!, ...fields, finishedAt: Date.now() });
-  };
   let registration: any = null;
+  let timer: number | null = null;
+  stopWatching = () => {
+    registration?.unregister?.();
+    if (timer !== null) window.clearInterval(timer);
+    stopWatching = null;
+  };
+  const finish = (fields: Partial<Job>) => {
+    stopWatching?.();
+    if (move?.state === "running") setMove({ ...move, ...fields, finishedAt: Date.now() });
+  };
   try {
     const folder = await folderFor(to, state);
     if (!folder) throw new Error(`${to.name} has no Steam library`);
+    // Done when Steam lists the game in the target library only (during the move it lists it in both).
+    const arrived = async () => {
+      const homes = (await steamFolders()).filter((f) => f.apps.includes(game.appid!));
+      return homes.length === 1 && homes[0].index === folder.index;
+    };
     setMove({ ...base, message: "Moving files" });
+    // Steam's events carry the progress. Their eError is not a verdict: Steam sends 20 while a move is under
+    // way. A move counts as failed only when Steam goes quiet with a non-zero code and the game has not arrived.
+    let code = 0;
+    let lastEvent = Date.now();
     registration = SteamClient.InstallFolder.RegisterForMoveContentProgress((p: any) => {
       if (!move || move.state !== "running" || (p.appid && p.appid !== game.appid)) return;
-      if (p.eError) return finish({ state: "failed", error: `Steam could not move it (error ${p.eError})` });
+      lastEvent = Date.now();
+      code = p.eError || 0;
       const done = Number(p.strBytesMoved) || 0;
       const total = Number(p.strTotalBytesToMove) || 0;
       const now = Date.now();
       const rate = now - last.at > 900 && done > last.done ? ((done - last.done) * 1000) / (now - last.at) : move.rate;
       if (now - last.at > 900) last = { at: now, done };
-      setMove({ ...move, done, total, rate, percent: Math.floor(p.flProgress || 0) });
-      if (p.appid === game.appid && p.flProgress >= 100) finish({ state: "done", message: `Moved to ${to.name}`, percent: 100 });
+      setMove({ ...move, done, total, rate, percent: Math.min(99, Math.floor(p.flProgress || 0)) });
     });
-    await SteamClient.InstallFolder.MoveInstallFolderForApp(game.appid, folder.index);
+    timer = window.setInterval(async () => {
+      if (await arrived()) finish({ state: "done", message: `Moved to ${to.name}`, percent: 100 });
+      else if (code && Date.now() - lastEvent > 90_000) finish({ state: "failed", error: `Steam stopped moving it (code ${code})` });
+    }, 1000);
+    const result = await SteamClient.InstallFolder.MoveInstallFolderForApp(game.appid, folder.index);
+    if (typeof result === "number" && result !== 0) throw new Error(`Steam did not start the move (code ${result})`);
   } catch (e) {
     finish({ state: "failed", error: e instanceof Error ? e.message : String(e) });
     throw e;
@@ -221,6 +242,7 @@ export async function moveSteamGame(game: Game, from: Cartridge, to: Cartridge, 
 
 export function cancelSteamMove() {
   SteamClient.InstallFolder.CancelMove();
+  stopWatching?.();
   if (move?.state === "running") {
     setMove({ ...move, state: "cancelled", message: "Cancelled", finishedAt: Date.now() });
   }

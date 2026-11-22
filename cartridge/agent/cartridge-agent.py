@@ -247,12 +247,22 @@ JS_HIDDEN = "collectionStore.BIsHidden({appid})"
 JS_SET_HIDDEN = "collectionStore.SetAppsAsHidden([{appid}], {hidden})"
 JS_FOLDERS = ("SteamClient.InstallFolder.GetInstallFolders().then(fs => fs.map(f => "
               "({index: f.nFolderIndex, path: f.strFolderPath, mounted: f.bIsMounted, label: f.strUserLabel})))")
+# Steam can take minutes to notice an unplugged drive on its own. Asking it to remove the folder makes it
+# look, and it drops the folder at once when it is gone. True once Steam no longer lists it.
+JS_REMOVE_FOLDER = """(async () => {{
+  SteamClient.InstallFolder.RemoveInstallFolder({index});
+  for (let n = 0; n < 12; n++) {{
+    await new Promise(r => setTimeout(r, 250));
+    if (!(await SteamClient.InstallFolder.GetInstallFolders()).some(f => f.nFolderIndex === {index})) return true;
+  }}
+  return false;
+}})()"""
 
 
 def sync_libraries(steam, state, wanted):
     """Steam's library folders follow the cartridges: a plugged-in cartridge's SteamLibrary/ is added (its
     games show as installed), and removed again once the cartridge is gone (they show as not installed).
-    Returns True when nothing is left to do."""
+    A folder that is still on disk is never removed. Returns True when nothing is left to do."""
     libs = state.setdefault("libraries", {})
     folders = {os.path.normpath(f["path"]): f for f in steam.eval(JS_FOLDERS) or []}
     for path, info in sorted(wanted.items()):
@@ -271,15 +281,12 @@ def sync_libraries(steam, state, wanted):
     done = True
     for path in sorted(set(libs) - set(wanted)):
         folder = folders.get(os.path.normpath(path))
-        if folder and os.path.isdir(path):
-            folder = None  # still there (the manifest went unreadable): leave Steam's entry alone
-        elif folder and folder["mounted"]:
-            steam.eval("SteamClient.InstallFolder.RefreshFolders()")  # Steam has not noticed the unplug yet
-            done = False
-            continue
-        elif folder:
-            steam.eval(f"SteamClient.InstallFolder.RemoveInstallFolder({folder['index']})")
-            log(f"removed Steam library {path}: cartridge {libs[path]['cartridge']} is unplugged")
+        if folder and not os.path.isdir(path):
+            if not steam.eval(JS_REMOVE_FOLDER.format(index=folder["index"])):
+                done = False  # Steam kept it: try again on the next check
+                continue
+            log(f"removed Steam library {path} of cartridge {libs[path]['cartridge']}: the folder is gone")
+        # Not in Steam any more, or still on disk (its manifest went unreadable): Steam's entry stays as it is.
         del libs[path]
         save_state(state)
     return done

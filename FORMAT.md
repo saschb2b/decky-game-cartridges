@@ -154,7 +154,8 @@ manages them as usual (updates, file checks, launching), and the cartridge needs
   labelled with the cartridge name) when the cartridge is plugged in, and removes it again
   (`RemoveInstallFolder`) once Steam sees it unmounted. While the cartridge is in, its Steam games show
   as installed; without it, Steam shows them as not installed. Play time and settings belong to the
-  account and stay.
+  account and stay. SteamOS and Bazzite's automounter adds a drive's Steam library by itself; the agent
+  then only takes it over, and does the adding on other systems.
 - Readers list these games together with the cartridge's own games. The plugin moves them with Steam's
   "Move install folder" (`MoveInstallFolderForApp`) and removes them with Steam's uninstall. It creates
   `SteamLibrary/` the first time a Steam game moves to a cartridge.
