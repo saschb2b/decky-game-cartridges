@@ -17,7 +17,6 @@ import pwd
 import re
 import secrets
 import signal
-import socket
 import time
 
 import decky
@@ -179,7 +178,8 @@ def describe_drive(disk):
                       "label": p.get("label"), "mounts": mps, "used": p.get("fsused"),
                       "entries": top_entries(mps[0]) if mps else []})
     vendor = (disk.get("vendor") or "").strip()
-    model = " ".join(x for x in (vendor if vendor not in ("ATA", "USB", "Generic") else "", (disk.get("model") or "").strip()) if x)
+    brand = vendor if vendor not in ("ATA", "USB", "Generic") else ""
+    model = " ".join(x for x in (brand, (disk.get("model") or "").strip()) if x)
     return {"dev": disk["path"], "name": disk["name"], "model": model or disk["name"], "serial": disk.get("serial"),
             "size": disk.get("size") or 0, "speed": usb_speed(disk["name"]), "partitions": parts,
             "token": drive_token(disk)}

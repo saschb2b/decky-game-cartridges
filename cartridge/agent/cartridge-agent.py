@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Game cartridges agent: plug in a drive with a cartridge.json at its root and its games appear in the
-Steam library; unplug it and they are hidden again (kept under Hidden, with their play time). Runs as a systemd user service (install.sh).
+Steam library; unplug it and they are hidden again (kept under Hidden, with their play time). Runs as a
+systemd user service (install.sh).
 
 It watches the mount table, and talks to the running Steam client over its local debug port
 (127.0.0.1:8080, the one Decky Loader uses too) to add and remove non-Steam shortcuts live, with the
@@ -129,7 +130,7 @@ class Steam:
             with urllib.request.urlopen(CDP_LIST, timeout=3) as r:
                 targets = json.load(r)
         except OSError as e:
-            raise SteamUnavailable(f"Steam's debug port is not answering ({e})")
+            raise SteamUnavailable(f"Steam's debug port is not answering ({e})") from e
         page = next((t for t in targets if t.get("title") == "SharedJSContext"), None)
         if not page:
             raise SteamUnavailable("Steam is starting (no SharedJSContext yet)")

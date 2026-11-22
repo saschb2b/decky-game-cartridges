@@ -1,0 +1,11 @@
+name: Idea
+description: Something the plugin could do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What you would like to do with your cartridges, and what gets in the way today.
+    validations:
+      required: true

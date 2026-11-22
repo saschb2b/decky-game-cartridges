@@ -8,9 +8,12 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 FOLDER = "game-cartridges"
-FILES = ["plugin.json", "package.json", "main.py", "LICENSE", "README.md", "FORMAT.md", "dist/index.js",
-         "backend/cart_worker.py", "templates/README.txt", "cartridge/lib.sh", "cartridge/agent/cartridge-agent.py",
-         "cartridge/agent/install.sh", "cartridge/agent/uninstall.sh"]
+FILES = [
+    "plugin.json", "package.json", "main.py", "LICENSE",
+    "LICENSE-decky-plugin-template", "README.md", "FORMAT.md", "dist/index.js",
+    "backend/cart_worker.py", "templates/README.txt", "cartridge/lib.sh", "cartridge/agent/cartridge-agent.py",
+    "cartridge/agent/install.sh", "cartridge/agent/uninstall.sh",
+]
 
 
 def main():

@@ -86,7 +86,8 @@ installed instead of disappearing. This part has had the least testing.
 ## Status
 
 Version 0.1.0, tested on a Bazzite PC so far. Reports from SteamOS and the Steam Deck are welcome,
-and so are bug reports and pull requests.
+and so are bug reports and pull requests. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to set up
+and what the checks are. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version.
 
 ## Building
 
@@ -98,7 +99,8 @@ pnpm run build
 python3 tools/package.py
 ```
 
-That writes `out/game-cartridges.zip`. `tools/install.sh` builds the zip, copies it to a machine and
+That writes `out/game-cartridges.zip`. The tests and linters are described in
+[CONTRIBUTING.md](CONTRIBUTING.md). `tools/install.sh` builds the zip, copies it to a machine and
 installs it through Decky's own installer. It confirms Decky's prompt over Steam's debug port, so it
 needs an SSH tunnel to that port:
 
@@ -124,4 +126,5 @@ Logs are in `~/homebrew/logs/game-cartridges/` for the plugin, and in
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The build setup started from Decky's plugin template, whose license is in
+[LICENSE-decky-plugin-template](LICENSE-decky-plugin-template).

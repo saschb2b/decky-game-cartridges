@@ -1,0 +1,12 @@
+# Tool settings only; the plugin is not a Python package.
+
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+extend-exclude = ["node_modules", "dist", "out"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

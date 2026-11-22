@@ -1,0 +1,33 @@
+name: Bug report
+description: Something does not work as described.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Device and system
+      placeholder: Steam Deck OLED, SteamOS 3.7 Stable / desktop PC, Bazzite 43
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Plugin and Decky Loader versions
+      description: Both are listed in Decky's settings under Plugins and General.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        The newest file in `~/homebrew/logs/game-cartridges/`, and for games that do not appear or hide:
+        `journalctl --user -u game-cartridges -b`
+      render: text

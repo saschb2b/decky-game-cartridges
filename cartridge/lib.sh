@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared helpers for the launchers on a game cartridge (sourced, not run).
 #
 # Rule of the cartridge: the drive holds only things every machine can share (game files, builds,

@@ -27,7 +27,7 @@ def say(**fields):
 
 def tree_size(path):
     total = files = 0
-    for root, dirs, names in os.walk(path):
+    for root, _dirs, names in os.walk(path):
         for name in names:
             st = os.lstat(os.path.join(root, name))
             if stat.S_ISREG(st.st_mode):
@@ -81,7 +81,7 @@ def copy_tree(src, dst):
                 raise OSError(f"{s}: copied {offset} of {st.st_size} bytes")
             shutil.copystat(s, d, follow_symlinks=False)
     # Folder times last: writing into a folder changes its mtime.
-    for root, dirs, names in os.walk(src):
+    for root, _dirs, _names in os.walk(src):
         rel = os.path.relpath(root, src)
         shutil.copystat(root, dst if rel == "." else os.path.join(dst, rel))
     got, got_files = tree_size(dst)
@@ -123,9 +123,12 @@ def _newer(src, dst):
     if a == b:
         return False
     if src.endswith("cartridge-agent.py"):
-        version = lambda t: int((re.search(r"^AGENT_VERSION = (\d+)", t, re.M) or [0, 1])[1])
+        def version(t):
+            return int((re.search(r"^AGENT_VERSION = (\d+)", t, re.M) or [0, 1])[1])
         return version(a) > version(b)
-    helpers = lambda t: set(re.findall(r"^([a-z_]+)\(\)", t, re.M))
+
+    def helpers(t):
+        return set(re.findall(r"^([a-z_]+)\(\)", t, re.M))
     return helpers(a) > helpers(b) or (helpers(a) == helpers(b) and os.path.getmtime(src) > os.path.getmtime(dst))
 
 
