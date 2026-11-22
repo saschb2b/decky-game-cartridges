@@ -34,8 +34,9 @@ export function useCover(cart: Cartridge | null | undefined) {
 /** A cartridge (or this machine) as its card: label with the cover art, free space, and children. */
 export function CartCard({ cart, children, width, labelHeight, name }: { cart: Cartridge; children?: ReactNode; width?: number | string; labelHeight?: number; name?: string }) {
   const cover = useCover(cart);
-  // No label art chosen: the first game's hero image stands in.
-  const art = cover ?? (cart.home ? null : cart.games.map((g) => wideURL(g.appid)).find(Boolean) ?? null);
+  // No label art chosen: the games' hero images stand in, taking turns when there are several.
+  const heroes = cart.home ? [] : [...new Set(cart.games.map((g) => wideURL(g.appid)).filter((u): u is string => !!u))];
+  const art = cover ?? (heroes.length ? heroes : null);
   return (
     <CartridgeCard
       name={name ?? cart.name}

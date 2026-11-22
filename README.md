@@ -21,8 +21,8 @@ Open the Quick Access menu (the `…` button), then the plug icon, then **Game C
 
 **Make a cartridge.** Plug in an SSD. It shows under **New cartridge**. Pick it, type a name (Steam's
 keyboard opens when you select the field), and optionally choose a cover image (PNG, JPEG or WebP
-from your home folder or a drive; it is cropped to a 2:3 portrait). Without one, the label shows the hero art of the cartridge's first
-game. **Erase and make cartridge…**
+from your home folder or a drive; it is cropped to a 2:3 portrait). Without one, the label shows the hero art of the cartridge's games,
+taking turns every few seconds when there are several. **Erase and make cartridge…**
 shows the drive's model, size and what is on it, and erases it only after you confirm. The drive
 becomes an empty ext4 cartridge, mounted at `/run/media/<you>/<name>`.
 

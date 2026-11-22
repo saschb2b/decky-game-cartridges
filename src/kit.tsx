@@ -3,7 +3,7 @@
 // games sit on the plastic below it, and the edge connector closes the bottom. Everything else
 // (buttons, text, focus) stays Steam's own.
 import { Focusable } from "@decky/ui";
-import { CSSProperties, ReactNode } from "react";
+import { CSSProperties, ReactNode, useEffect, useState } from "react";
 import type { Cartridge } from "./api";
 
 export const SHELLS: { name: string; hex: string }[] = [
@@ -45,7 +45,8 @@ const BEVEL = 4;
 export type CardProps = {
   name: string;
   shell: string;
-  art?: string | null;
+  /** Label art; several images become a slideshow. */
+  art?: string | string[] | null;
   /** Right side of the label strip, e.g. "USB 3". */
   tag?: ReactNode;
   /** A blank drive (no label yet), or the machine's own storage (no connector, power light). */
@@ -152,7 +153,7 @@ function Label({
   height,
 }: {
   name: string;
-  art?: string | null;
+  art?: string | string[] | null;
   tag?: ReactNode;
   kind: CardProps["kind"];
   height: number;
@@ -180,17 +181,13 @@ function Label({
   }
   return (
     <div style={{ borderRadius: 5, overflow: "hidden", background: "#efe9dd", boxShadow: "0 0 0 1px rgba(0,0,0,.28), 0 1px 0 rgba(255,255,255,.12)" }}>
-      {art && (
-        <div style={{ height, background: "#111", overflow: "hidden" }}>
-          <img src={art} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-        </div>
-      )}
-      <div style={{ height: art ? 28 : 36, display: "flex", alignItems: "center", gap: 8, padding: "0 9px", color: "#17181b" }}>
+      {art && art.length > 0 && <LabelArt images={typeof art === "string" ? [art] : art} height={height} />}
+      <div style={{ height: art?.length ? 28 : 36, display: "flex", alignItems: "center", gap: 8, padding: "0 9px", color: "#17181b" }}>
         <div
           style={{
             flex: 1,
             minWidth: 0,
-            fontSize: art ? 14 : 16,
+            fontSize: art?.length ? 14 : 16,
             fontWeight: 800,
             letterSpacing: "0.03em",
             textTransform: "uppercase",
@@ -203,6 +200,56 @@ function Label({
         </div>
         {tag && <div style={{ flex: "none", fontSize: 11, fontWeight: 700, color: "rgba(0,0,0,.5)", letterSpacing: "0.04em" }}>{tag}</div>}
       </div>
+    </div>
+  );
+}
+
+const SLIDE_SECONDS = 6;
+
+/** The label's picture; with several images they take turns, crossfading, with dots for the position. */
+function LabelArt({ images, height }: { images: string[]; height: number }) {
+  const [index, setIndex] = useState(0);
+  const key = images.join("|");
+  useEffect(() => {
+    setIndex(0);
+    if (images.length < 2) return;
+    const timer = window.setInterval(() => setIndex((i) => (i + 1) % images.length), SLIDE_SECONDS * 1000);
+    return () => window.clearInterval(timer);
+  }, [key]);
+  return (
+    <div style={{ height, position: "relative", background: "#111", overflow: "hidden" }}>
+      {images.map((src, i) => (
+        <img
+          key={src}
+          src={src}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            opacity: i === index ? 1 : 0,
+            transition: "opacity 1.2s ease",
+          }}
+        />
+      ))}
+      {images.length > 1 && (
+        <div style={{ position: "absolute", right: 7, bottom: 6, display: "flex", gap: 4 }}>
+          {images.map((src, i) => (
+            <div
+              key={src}
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: 3,
+                background: i === index ? "#fff" : "rgba(255,255,255,.4)",
+                boxShadow: "0 0 2px rgba(0,0,0,.6)",
+                transition: "background .6s",
+              }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
