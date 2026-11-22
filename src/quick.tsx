@@ -1,36 +1,41 @@
 import { toaster, useQuickAccessVisible } from "@decky/api";
-import { ButtonItem, DialogButton, Focusable, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
-import { FaArrowRight, FaCheck, FaCopy, FaExclamationTriangle, FaHdd, FaTrash } from "react-icons/fa";
+import { DialogButton, Focusable, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
 import { useState } from "react";
-import { cancelJob, Cartridge, installAgent, Job, State } from "./api";
-import { Cover, GameArt, Meter, muted, SpeedWarning, useCover } from "./components";
-import { CartridgeModal, FormatModal, GameModal } from "./modals";
+import { cancelJob, Cartridge, Drive, installAgent, Job, State } from "./api";
+import { CartArt, muted, speedText } from "./components";
+import { ArtTile, CartridgeArt, Cells, Legend, KIT_CSS, Readout, Seg, sizeParts, VFD } from "./kit";
+import { CartridgeModal, FormatModal, GameModal, doEject } from "./modals";
+import { portraitURL } from "./steam";
 import { errorText, fmtBytes, refresh, useCartridgeState } from "./store";
 
-function AgentRow({ state }: { state: State }) {
+// ---- the background service -----------------------------------------------------------------------------
+
+function ServiceNotice({ state }: { state: State }) {
   const [busy, setBusy] = useState(false);
   const { agent } = state;
   const outdated = agent.installed && (agent.version ?? 1) < (agent.bundled ?? 1);
   if (agent.installed && agent.running && !outdated) return null;
-  const text = !agent.installed
-    ? "The cartridge service is not installed: cartridge games won't appear in Steam."
+  const [title, text] = !agent.installed
+    ? ["Service not installed", "Cartridge games won't appear in Steam until the cartridge service runs."]
     : outdated
-      ? `The cartridge service is version ${agent.version}; this plugin brings version ${agent.bundled}.`
-      : "The cartridge service is not running.";
+      ? [`Service v${agent.version} → v${agent.bundled}`, "This plugin brings a newer cartridge service."]
+      : ["Service stopped", "Cartridge games won't appear or hide until it runs again."];
   return (
-    <PanelSection title="Cartridge service">
+    <PanelSection>
       <PanelSectionRow>
-        <div style={{ ...muted, color: "#ffb347" }}>{text}</div>
+        <Readout>
+          <Legend color={VFD.amber}>{title}</Legend>
+          <div style={{ color: "#e9d9bf", fontSize: 12, lineHeight: 1.4, marginTop: 4 }}>{text}</div>
+        </Readout>
       </PanelSectionRow>
       <PanelSectionRow>
-        <ButtonItem
-          layout="below"
+        <DialogButton
           disabled={busy}
           onClick={async () => {
             setBusy(true);
             try {
               await installAgent();
-              toaster.toast({ title: "Game Cartridges", body: "Cartridge service installed" });
+              toaster.toast({ title: "Game Cartridges", body: "Cartridge service ready" });
             } catch (e) {
               toaster.toast({ title: "Could not install the service", body: errorText(e) });
             }
@@ -38,149 +43,230 @@ function AgentRow({ state }: { state: State }) {
             refresh();
           }}
         >
-          {!agent.installed ? "Install" : outdated ? "Update" : "Start"}
-        </ButtonItem>
+          {!agent.installed ? "Install service" : outdated ? "Update service" : "Start service"}
+        </DialogButton>
       </PanelSectionRow>
     </PanelSection>
   );
 }
 
-const VERB: Record<Job["kind"], [string, string]> = {
+// ---- transfers ------------------------------------------------------------------------------------------
+
+export const VERBS: Record<Job["kind"], [string, string]> = {
   copy: ["Copying", "Copied"],
   move: ["Moving", "Moved"],
   remove: ["Removing", "Removed"],
-  format: ["Formatting", "Ready"],
+  format: ["Formatting", "Formatted"],
 };
 
-function duration(seconds: number) {
-  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
-  return `${Math.floor(seconds / 3600)} h ${Math.round((seconds % 3600) / 60)} min`;
+function clock(seconds: number) {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
 }
 
-/** One running (or just finished) job as a compact card: what, from where to where, how far, how long. */
-function JobCard({ job }: { job: Job }) {
+function TransferReadout({ job }: { job: Job }) {
   const running = job.state === "running" || job.state === "queued";
   const failed = job.state === "failed";
-  const finished = job.state === "done";
-  const [doing, did] = VERB[job.kind];
+  const [doing, did] = VERBS[job.kind];
   const copying = running && job.total > 0 && job.message === "Copying files";
-  const pct = finished ? 100 : copying ? Math.min(100, Math.floor((job.done / job.total) * 100)) : undefined;
+  const pct = job.state === "done" ? 100 : copying ? Math.min(99, Math.floor((job.done / job.total) * 100)) : 0;
+  const color = failed ? VFD.amber : VFD.lit;
   const route =
-    job.kind === "remove" ? `from ${job.src_name}` : job.kind === "format" ? job.src_name : `${job.src_name} → ${job.dst_name}`;
-  let status: string;
-  if (failed) status = job.error ?? "Failed";
-  else if (finished) status = job.message;
-  else if (job.state === "queued") status = "Waiting for the job before it";
-  else if (copying) {
-    const left = job.rate ? (job.total - job.done) / job.rate : null;
-    status = `${fmtBytes(job.done)} of ${fmtBytes(job.total)}`;
-    if (job.rate) status += ` · ${fmtBytes(job.rate)}/s`;
-    if (left !== null) status += ` · ${duration(left)} left`;
-  } else status = `${job.message}…`;
-  const accent = failed ? "#e35d5b" : finished ? "#5ba32b" : "#1a9fff";
-  const Icon = failed ? FaExclamationTriangle : finished ? FaCheck : { copy: FaCopy, move: FaArrowRight, remove: FaTrash, format: FaHdd }[job.kind];
+    job.kind === "remove" ? `from ${job.src_name}` : job.kind === "format" ? `${job.src_name}` : `${job.src_name} → ${job.dst_name}`;
+  const left = copying && job.rate ? (job.total - job.done) / job.rate : null;
+  const status = failed ? job.error : copying ? `${fmtBytes(job.done)} / ${fmtBytes(job.total)}` : job.message;
   return (
     <PanelSectionRow>
-      <Focusable
-        style={{
-          background: "rgba(255,255,255,.05)",
-          borderLeft: `3px solid ${accent}`,
-          borderRadius: 4,
-          padding: "8px 10px",
-          margin: "4px 0",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, letterSpacing: 0.5, textTransform: "uppercase", color: accent }}>
-          <Icon size={11} />
-          <span style={{ flex: 1 }}>{failed ? `${doing} failed` : finished ? did : doing}</span>
-          {pct !== undefined && !finished && <span style={{ color: "#dcdedf", fontSize: 12 }}>{pct}%</span>}
-        </div>
-        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25, margin: "4px 0 1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {job.subject ?? job.title}
-        </div>
-        <div style={{ ...muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{route}</div>
-        {!failed && (
-          <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,.12)", margin: "8px 0 6px", overflow: "hidden" }}>
-            <div
-              className={pct === undefined ? "gc-indeterminate" : undefined}
-              style={{
-                height: 4,
-                borderRadius: 2,
-                background: accent,
-                width: pct === undefined ? "30%" : `${pct}%`,
-                transition: "width .8s linear",
-              }}
-            />
-          </div>
-        )}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ ...muted, flex: 1, color: failed ? "#e88" : muted.color, lineHeight: 1.3, marginTop: failed ? 6 : 0 }}>{status}</div>
-          {running && job.kind !== "format" && (
-            <DialogButton
-              style={{ minWidth: 0, width: "auto", padding: "2px 12px", fontSize: 12, height: 26, lineHeight: "22px" }}
-              onClick={() => cancelJob(job.id).then(refresh)}
-            >
-              Cancel
-            </DialogButton>
+      <Readout>
+        <div style={{ display: "flex", alignItems: "center", minHeight: 20 }}>
+          <Legend color={color} style={{ flex: 1 }}>
+            {failed ? `${doing} failed` : job.state === "done" ? did : job.state === "queued" ? "Queued" : doing}
+          </Legend>
+          {(copying || job.state === "done") && (
+            <>
+              <Seg text={String(pct).padStart(2, " ")} height={20} color={color} />
+              <Legend color={color} style={{ marginLeft: 3, alignSelf: "flex-end" }}>
+                %
+              </Legend>
+            </>
           )}
         </div>
-      </Focusable>
+        <div
+          style={{
+            color,
+            fontSize: 14,
+            fontWeight: 600,
+            margin: "6px 0 2px",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {job.subject ?? job.title}
+        </div>
+        <Legend>{route}</Legend>
+        <div style={{ margin: "8px 0 6px" }}>
+          <Cells fraction={pct / 100} cells={28} color={color} height={5} />
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Legend style={{ flex: 1, letterSpacing: "0.08em", lineHeight: 1.4 }}>{running && !copying ? `${status}…` : status}</Legend>
+          {copying && job.rate ? (
+            <Legend style={{ letterSpacing: "0.08em" }}>
+              {fmtBytes(job.rate)}/s · {left !== null ? clock(left) : "--:--"}
+            </Legend>
+          ) : null}
+        </div>
+      </Readout>
+      {running && job.kind !== "format" && (
+        <div style={{ marginTop: 6 }}>
+          <DialogButton style={{ height: 30, padding: 0 }} onClick={() => cancelJob(job.id).then(refresh)}>
+            Cancel
+          </DialogButton>
+        </div>
+      )}
     </PanelSectionRow>
   );
 }
 
-const INDETERMINATE_CSS = `@keyframes gc-slide { from { margin-left: -30%; } to { margin-left: 100%; } }
-.gc-indeterminate { animation: gc-slide 1.4s ease-in-out infinite; }`;
+// ---- a cartridge ----------------------------------------------------------------------------------------
 
-function CartridgeSection({ cart }: { cart: Cartridge }) {
-  const cover = useCover(cart);
-  const used = cart.total - cart.free;
+function CartridgeBlock({ cart, jobs, first }: { cart: Cartridge; jobs: Job[]; first?: boolean }) {
+  const [free, unit] = sizeParts(cart.free);
+  const slow = !!cart.speed && cart.speed <= 480;
+  const subtitle = cart.home ? "Internal storage" : [speedText(cart.speed), cart.model].filter(Boolean).join(" · ");
   return (
-    <PanelSection title={cart.home ? `${cart.name} · internal` : cart.name}>
+    <PanelSection>
       <PanelSectionRow>
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-start", paddingBottom: 4 }}>
-          <Cover cart={cart} url={cover} width={52} />
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginTop: first ? 0 : 18 }}>
+          <div style={{ paddingTop: cart.home ? 10 : 2 }}>
+            <CartArt cart={cart} width={70} />
+          </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13 }}>
-              {fmtBytes(cart.free)} free of {fmtBytes(cart.total)}
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 800,
+                letterSpacing: "-0.01em",
+                lineHeight: 1.15,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {cart.name}
             </div>
-            <Meter used={used} total={cart.total} />
-            <div style={{ ...muted, marginTop: 4 }}>
-              {cart.games.length
-                ? `${cart.games.length} game${cart.games.length === 1 ? "" : "s"}`
-                : cart.home
-                  ? "Move games here from a cartridge to play them without it."
-                  : "No games yet: copy some from another cartridge."}
+            <div style={{ ...muted, fontSize: 11, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {subtitle}
             </div>
-            <SpeedWarning cart={cart} />
+            <Readout style={{ marginTop: 8, padding: "7px 9px" }}>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 4 }}>
+                <Seg text={free} height={19} />
+                <Legend style={{ marginBottom: 1 }}>{unit} free</Legend>
+                <div style={{ flex: 1 }} />
+                <Legend style={{ marginBottom: 1 }}>
+                  {cart.games.length} {cart.games.length === 1 ? "game" : "games"}
+                </Legend>
+              </div>
+              <div style={{ marginTop: 7 }}>
+                <Cells fraction={cart.total ? (cart.total - cart.free) / cart.total : 0} cells={20} height={4} />
+              </div>
+            </Readout>
           </div>
         </div>
       </PanelSectionRow>
-      {cart.games.map((game) => (
-        <PanelSectionRow key={game.id}>
-          <ButtonItem layout="below" onClick={() => showModal(<GameModal gameId={game.id} from={cart.mount} />)}>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", textAlign: "left" }}>
-              <GameArt mount={cart.mount} id={game.id} appid={game.appid} width={28} />
-              <div style={{ minWidth: 0, lineHeight: 1.25 }}>
-                <div style={{ fontSize: 14 }}>{game.title}</div>
-                <div style={{ ...muted, marginTop: 2 }}>
-                  {fmtBytes(game.size)}
-                  {game.present ? "" : " · files missing"}
-                </div>
-              </div>
+      {slow && (
+        <PanelSectionRow>
+          <Readout style={{ padding: "6px 9px" }}>
+            <Legend color={VFD.amber}>USB 2 port · 480 Mb/s</Legend>
+            <div style={{ color: "#e9d9bf", fontSize: 12, marginTop: 3, lineHeight: 1.35 }}>
+              Games load very slowly here. Plug the cartridge into a USB 3 port (blue, teal or USB-C).
             </div>
-          </ButtonItem>
+          </Readout>
         </PanelSectionRow>
-      ))}
+      )}
+      {cart.games.length > 0 ? (
+        <PanelSectionRow>
+          <Focusable style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px 9px", padding: "4px 0 2px" }}>
+            {cart.games.map((game) => {
+              const job = jobs.find((j) => j.game === game.id && (j.state === "running" || j.state === "queued"));
+              const pct = job && job.total ? Math.floor((job.done / job.total) * 100) : null;
+              return (
+                <ArtTile
+                  key={game.id}
+                  art={portraitURL(game.appid)}
+                  title={game.title}
+                  dim={!game.present}
+                  caption={fmtBytes(game.size)}
+                  badge={job ? `${VERBS[job.kind][0]}${pct !== null ? ` ${pct}%` : ""}` : !game.present ? "Files missing" : undefined}
+                  onActivate={() => showModal(<GameModal gameId={game.id} from={cart.mount} />)}
+                />
+              );
+            })}
+          </Focusable>
+        </PanelSectionRow>
+      ) : (
+        <PanelSectionRow>
+          <div style={{ ...muted, lineHeight: 1.4, padding: "2px 0" }}>
+            {cart.home
+              ? "Games moved here play without a cartridge plugged in."
+              : "Empty. Copy games here from another cartridge or from This PC."}
+          </div>
+        </PanelSectionRow>
+      )}
       <PanelSectionRow>
-        <ButtonItem layout="below" onClick={() => showModal(<CartridgeModal mount={cart.mount} />)}>
-          {cart.home ? "Manage internal cartridge…" : "Manage cartridge…"}
-        </ButtonItem>
+        <Focusable className="gc-btn-row" flow-children="right" style={{ marginTop: 4 }}>
+          <DialogButton style={{ height: 32 }} onClick={() => showModal(<CartridgeModal mount={cart.mount} />)}>
+            Manage
+          </DialogButton>
+          {!cart.home && (
+            <DialogButton style={{ height: 32 }} onClick={() => doEject(cart)}>
+              Eject
+            </DialogButton>
+          )}
+        </Focusable>
       </PanelSectionRow>
     </PanelSection>
   );
 }
+
+// ---- a drive that is not a cartridge yet ----------------------------------------------------------------
+
+function BlankBlock({ drive }: { drive: Drive }) {
+  const [size, unit] = sizeParts(drive.size);
+  const used = drive.partitions.filter((p) => p.fstype);
+  return (
+    <PanelSection>
+      <PanelSectionRow>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginTop: 18 }}>
+          <CartridgeArt name="" shell="#3b3f47" blank width={62} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, lineHeight: 1.15 }}>Blank drive</div>
+            <div style={{ ...muted, fontSize: 11, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {[drive.model, speedText(drive.speed)].filter(Boolean).join(" · ")}
+            </div>
+            <Readout style={{ marginTop: 8, padding: "7px 9px" }}>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 4 }}>
+                <Seg text={size} height={19} />
+                <Legend style={{ marginBottom: 1 }}>{unit}</Legend>
+              </div>
+              <Legend style={{ display: "block", marginTop: 6, letterSpacing: "0.08em" }}>
+                {used.length ? `Has data: ${used.map((p) => p.label || p.fstype).join(", ")}` : "No partitions"}
+              </Legend>
+            </Readout>
+          </div>
+        </div>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <DialogButton style={{ height: 32, marginTop: 4 }} onClick={() => showModal(<FormatModal drive={drive} />)}>
+          Make cartridge…
+        </DialogButton>
+      </PanelSectionRow>
+    </PanelSection>
+  );
+}
+
+// ---- the panel ------------------------------------------------------------------------------------------
 
 export function QuickPanel() {
   const visible = useQuickAccessVisible();
@@ -189,7 +275,9 @@ export function QuickPanel() {
     return (
       <PanelSection>
         <PanelSectionRow>
-          <div style={muted}>Loading…</div>
+          <Readout>
+            <Legend>Reading cartridges…</Legend>
+          </Readout>
         </PanelSectionRow>
       </PanelSection>
     );
@@ -202,48 +290,32 @@ export function QuickPanel() {
   );
   return (
     <>
-      <AgentRow state={state} />
+      <style>{KIT_CSS}</style>
+      <ServiceNotice state={state} />
       {jobs.length > 0 && (
-        <PanelSection title="In progress">
-          <style>{INDETERMINATE_CSS}</style>
+        <PanelSection>
           {jobs.map((job) => (
-            <JobCard key={job.id} job={job} />
+            <TransferReadout key={job.id} job={job} />
           ))}
         </PanelSection>
       )}
-      {usb.map((cart) => (
-        <CartridgeSection key={cart.mount} cart={cart} />
+      {usb.map((cart, i) => (
+        <CartridgeBlock key={cart.mount} cart={cart} jobs={state.jobs} first={i === 0 && jobs.length === 0} />
       ))}
-      {usb.length === 0 && (
-        <PanelSection title="Cartridges">
+      {state.drives.map((drive) => (
+        <BlankBlock key={drive.dev} drive={drive} />
+      ))}
+      {usb.length === 0 && state.drives.length === 0 && (
+        <PanelSection>
           <PanelSectionRow>
-            <div style={muted}>No cartridge plugged in.</div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <CartridgeArt name="" shell="#30343b" blank width={44} style={{ opacity: 0.6 }} />
+              <div style={{ ...muted, lineHeight: 1.4 }}>Plug in a cartridge, or a blank USB drive to make one.</div>
+            </div>
           </PanelSectionRow>
         </PanelSection>
       )}
-      {home && (home.games.length > 0 || usb.length > 0) && <CartridgeSection cart={home} />}
-      <PanelSection title="New cartridge">
-        {state.drives.map((drive) => (
-          <PanelSectionRow key={drive.dev}>
-            <ButtonItem
-              layout="below"
-              onClick={() => showModal(<FormatModal drive={drive} />)}
-              description={`${fmtBytes(drive.size)} · ${
-                drive.partitions.length
-                  ? drive.partitions.map((p) => p.label || p.fstype || p.name).join(", ")
-                  : "empty"
-              }${drive.speed !== null && drive.speed <= 480 ? " · USB 2 port" : ""}`}
-            >
-              Make "{drive.model}" a cartridge…
-            </ButtonItem>
-          </PanelSectionRow>
-        ))}
-        {state.drives.length === 0 && (
-          <PanelSectionRow>
-            <div style={muted}>Plug in a USB drive to make it a cartridge. It gets erased.</div>
-          </PanelSectionRow>
-        )}
-      </PanelSection>
+      {home && <CartridgeBlock cart={home} jobs={state.jobs} />}
     </>
   );
 }

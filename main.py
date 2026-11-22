@@ -39,6 +39,7 @@ SETTINGS = Path(decky.DECKY_PLUGIN_SETTINGS_DIR) / "settings.json"
 IMAGE_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 SYSTEM_MOUNTS = ("/", "/boot", "/boot/efi", "/efi", "/var", "/home", "/var/home", "/sysroot", "/usr", "/etc")
 GAME_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 log = decky.logger
 
 
@@ -238,6 +239,7 @@ def cartridge_info(mp, devices, shortcuts, home=False):
     default_name = ("This Deck" if is_deck() else "This PC") if home else os.path.basename(mp)
     info = {"mount": str(mp), "home": home, "exists": bool(manifest), "id": str(manifest.get("id") or ""),
             "name": manifest.get("name") or default_name, "format": manifest.get("format", 1),
+            "color": manifest.get("color") if COLOR.match(str(manifest.get("color") or "")) else None,
             "free": st.f_bavail * st.f_frsize, "total": st.f_blocks * st.f_frsize,
             "cover": None, "speed": None, "model": None, "dev": None, "games": [], "steam_library": None}
     cover = manifest.get("cover")
@@ -675,6 +677,21 @@ class Plugin:
         await write_json(os.path.join(mount, "cartridge.json"), manifest)
         return True
 
+    async def set_color(self, mount, color):
+        """The cartridge's shell colour (#rrggbb, or None for the default) for UIs that draw it."""
+        if color is not None and not COLOR.match(color):
+            raise RuntimeError(f"bad colour {color!r}")
+        cart = find_cartridge(await all_cartridges(), mount)
+        if cart["home"]:
+            await ensure_home_cartridge()
+        manifest = load_manifest(mount)
+        if color:
+            manifest["color"] = color.lower()
+        else:
+            manifest.pop("color", None)
+        await write_json(os.path.join(mount, "cartridge.json"), manifest)
+        return True
+
     async def rename_cartridge(self, mount, name):
         name = name.strip()
         if not name:
@@ -824,7 +841,7 @@ class Plugin:
 
         return enqueue(job, work)
 
-    async def format_drive(self, dev, token, name, cover_b64):
+    async def format_drive(self, dev, token, name, cover_b64, color=None):
         """Erases a USB drive and makes it an empty cartridge. token: from get_state, so the drive the user
         confirmed (model, size, partitions) is the one that gets erased."""
         name = (name or "").strip()
@@ -880,6 +897,8 @@ class Plugin:
             await worker("mkdir", os.path.join(mp, "games"))
             await worker("install-runtime", RUNTIME_SRC, mp)
             manifest = {"format": 1, "id": make_id(name), "name": name, "games": []}
+            if color and COLOR.match(color):
+                manifest["color"] = color.lower()
             if cover_b64:
                 await worker("write", os.path.join(mp, "cover.jpg"), stdin=base64.b64decode(cover_b64))
                 manifest["cover"] = "cover.jpg"

@@ -18,6 +18,8 @@ export type Cartridge = {
   id: string;
   name: string;
   format: number;
+  /** Shell colour "#rrggbb" from the manifest, or null. */
+  color: string | null;
   free: number;
   total: number;
   /** "cover.jpg?<mtime>" when the cartridge has a cover. */
@@ -98,6 +100,7 @@ export const getCover = callable<[mount: string], string | null>("get_cover");
 export const readImage = callable<[path: string], string | null>("read_image");
 export const getGameArt = callable<[mount: string, gameId: string], string | null>("get_game_art");
 export const setCover = callable<[mount: string, jpegBase64: string | null], boolean>("set_cover");
+export const setColor = callable<[mount: string, color: string | null], boolean>("set_color");
 export const renameCartridge = callable<[mount: string, name: string], boolean>("rename_cartridge");
 export const setSteamLibrary = callable<[mount: string], string>("set_steam_library");
 export type Holder = { pid: number; name: string; uid: number; cmd: string; closable: boolean };
@@ -106,6 +109,9 @@ export const installAgent = callable<[], string>("install_agent");
 export const cancelJob = callable<[id: string], boolean>("cancel_job");
 export const copyGame = callable<[src: string, gameId: string, dst: string, move: boolean], Job>("copy_game");
 export const removeGame = callable<[mount: string, gameId: string], Job>("remove_game");
-export const formatDrive = callable<[dev: string, token: string, name: string, coverBase64: string | null], Job>(
+export const formatDrive = callable<
+  [dev: string, token: string, name: string, coverBase64: string | null, color: string | null],
+  Job
+>(
   "format_drive",
 );
