@@ -10,7 +10,7 @@ Use a USB 3 port (blue/teal/red, or USB-C). On a USB 2 port the games load very 
 NEW MACHINE (once per machine)
 ------------------------------
 With the "Game Cartridges" Decky plugin: open it in the Quick Access menu and press
-"Install cartridge service" if it asks.
+"Install service" if it asks.
 
 Without Decky: Desktop mode -> Konsole (or ssh), then
 

@@ -4,8 +4,8 @@ A cartridge is a USB SSD that carries games. Plug it into any Bazzite PC or Stea
 cartridge agent installed and its games appear in the Steam library; unplug it and they are hidden.
 Saves never travel: every machine keeps its own.
 
-The first cartridge, "Zelda", was built on the Bazzite PC (see the reference files in `cartridge/`
-and `reference-zelda/`). This format is what that cartridge uses today.
+The shared files every cartridge carries are in `cartridge/`. The launchers in `examples/zelda/` come
+from a real cartridge and show how games are set up.
 
 ## Drive
 

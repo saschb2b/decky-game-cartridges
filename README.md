@@ -1,74 +1,106 @@
 # Game Cartridges
 
-USB SSDs as game cartridges for Bazzite and SteamOS. Plug one in and its games appear in the Steam
-library; unplug it and they are hidden again. Saves stay on each machine. The format is described in
-[FORMAT.md](FORMAT.md).
+A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Bazzite and SteamOS
+that turns USB SSDs into game cartridges. Plug one in and its games appear in the Steam library in
+Game Mode. Unplug it and they are hidden again. Saves and settings stay on each machine, so one
+cartridge can go from your PC to your Steam Deck to a friend's machine.
 
-This repository has three parts:
+![The games of a cartridge called Zelda as a collection in the Steam library](docs/screenshots/library.jpg)
 
-- `cartridge/`: what every cartridge carries (launcher helpers `lib.sh`, and the agent that shows
-  and hides games in Steam). Machines without Decky only need the agent.
-- the Decky plugin (`main.py`, `backend/`, `src/`): formats drives into cartridges and manages
-  them from the Quick Access menu in Game Mode.
-- `tools/format-cartridge.sh`: formatting from a shell, without the plugin.
+## What it does
 
-## Using the plugin
+Every plugged-in cartridge shows up in the Quick Access menu with its label, free space and games.
+The machine's internal storage appears the same way, as **This PC** (or **This Deck**).
 
-Open the Quick Access menu (the `…` button), then the plug icon, then **Game Cartridges**.
+<p>
+  <img src="docs/screenshots/panel.jpg" width="49%" alt="The plugin in the Quick Access menu: the Zelda cartridge with six games, and This PC">
+  <img src="docs/screenshots/copying.jpg" width="49%" alt="A game being copied from the cartridge to This PC, with speed and time left">
+</p>
 
-**First time on a machine.** If the panel says the cartridge service is missing or outdated, press
-**Install** or **Update**. That sets up `game-cartridges.service` for your user (no system changes).
+Select a game to copy or move it to another cartridge or to This PC, or to remove it. A copy shows
+its speed and the time left, and **Cancel** deletes the partial files. A game that moves keeps its
+Steam entry, play time and controller layout. The same options are in the game's menu in the Steam
+library, under **Game cartridge…**.
 
-**Make a cartridge.** Plug in an SSD. It shows under **New cartridge**. Pick it, type a name (Steam's
-keyboard opens when you select the field), and optionally choose a cover image (PNG, JPEG or WebP
-from your home folder or a drive; it is cropped to a 2:3 portrait). Without one, the label shows the hero art of the cartridge's games,
-taking turns every few seconds when there are several. **Erase and make cartridge…**
-shows the drive's model, size and what is on it, and erases it only after you confirm. The drive
-becomes an empty ext4 cartridge, mounted at `/run/media/<you>/<name>`.
+<p>
+  <img src="docs/screenshots/game.jpg" width="49%" alt="A game's sheet with Copy, Move and Remove">
+  <img src="docs/screenshots/manage.jpg" width="49%" alt="Managing a cartridge: name, label art, shell colour, Steam library and eject">
+</p>
 
-**See what's on a cartridge.** Each plugged-in cartridge has its own section: cover, free space, and
-its games. A warning appears when the drive runs at USB 2 speed (480 Mbit/s); move it to a USB 3
-port (blue, teal or USB-C), or games load very slowly. **This PC** (or **This Deck**) is the
-machine's internal storage in the same layout (`~/Games/HomeCartridge`).
+**Manage** renames a cartridge, sets its label art and shell colour, adds a Steam library to it and
+ejects it. If programs still use the drive, Eject lists them first. A cartridge without label
+art shows the hero images of its games in turn. Each cartridge also gets a Steam collection with its
+name.
 
-**Copy, move or remove a game.** Select a game in the panel, or open the game's options menu in the
-Steam library and choose **Game cartridge…**. Pick **Copy** or **Move** next to a target
-(another cartridge or This PC), or **Remove from …**. Progress shows at the top of the panel with
-speed and time left; **Cancel** stops a copy and deletes the partial files. A moved game keeps its
-Steam entry, play time and controller layout.
+An empty USB drive shows up as "Not a cartridge yet". **Make cartridge…** shows the drive's model,
+size and contents, and erases it only after you confirm. Cartridges are plain ext4 drives, which
+SteamOS and Bazzite mount on their own. If a cartridge sits in a USB 2 port, the plugin warns you,
+because games load very slowly there.
 
-**Manage a cartridge.** **Manage cartridge…** renames it (the drive label follows; the mount folder
-changes the next time it is plugged in), adds or changes the cover, adds a Steam library to it,
-and ejects it safely.
+## Installing
 
-**Steam games.** For an installed Steam game, **Game cartridge…** moves it with Steam's own "Move
-install folder" into a Steam library on the cartridge (it offers to create one). That suits your own
-machines: on another one, add the library once in Steam's storage settings, and the game needs your
-account or Family Sharing.
+You need Bazzite or SteamOS with Decky Loader, and a USB SSD. The plugin is not in the Decky store
+yet, so it is installed from a release:
 
-In Steam each plugged-in cartridge also gets a collection with its name. Steam collections can't
-show a custom picture, so the cover appears in the plugin.
+1. In Decky's settings, turn on **Developer mode** under General.
+2. Under **Developer**, use **Install Plugin from URL** with
+   `https://github.com/saschb2b/decky-game-cartridges/releases/latest/download/game-cartridges.zip`.
+   If you have downloaded the zip already, **Install Plugin from ZIP File** works as well.
+3. Open **Game Cartridges** in the Quick Access menu. If it says the cartridge service is missing,
+   press **Install service**.
 
-**Friends' machines without Decky.** They run the agent from the cartridge once (Desktop mode,
-Konsole): `bash /run/media/$USER/<name>/cartridge/agent/install.sh`. Its `README.txt` says the same.
+The cartridge service (`game-cartridges.service`) runs as your user. It watches for cartridges and
+adds or hides their games in Steam. Nothing outside your home folder is changed.
+
+## Using a cartridge on another machine
+
+Each machine needs the cartridge service once. With the plugin installed, the panel offers it. A
+machine without Decky can run the installer that every cartridge carries, from a terminal in Desktop
+Mode:
+
+```bash
+bash "/run/media/$USER/<cartridge name>/cartridge/agent/install.sh"
+```
+
+The `README.txt` on each cartridge explains the same. Only plug in cartridges you trust: pressing
+Play runs the cartridge's `launch.sh`.
 
 ## Which games can go on a cartridge
 
-Games in the cartridge layout: a `games/<id>/` folder with a self-locating `launch.sh` that keeps
-saves and settings in `~/.local/share/game-cartridges/<id>/` (see the Zelda reference in
-`reference-zelda/`). Other non-Steam shortcuts need converting by hand first. Steam games go through
-a Steam library on the cartridge (above).
+Any game that can start from its own folder. On a cartridge, a game is a folder `games/<id>/` with a
+`launch.sh` that finds its own location, so it works at any mount path, and that keeps saves and
+settings in `~/.local/share/game-cartridges/<id>/` on the machine. PC ports and recompilations,
+emulators with their games, and DRM-free Linux games all fit. Windows games that need Proton need
+their own launcher for now, since the shared helpers have nothing for Proton yet.
 
-## Building and installing
+The plugin copies, moves and removes games, but it cannot turn an existing game into a cartridge
+game yet. That step is done by hand. [FORMAT.md](FORMAT.md) describes the layout, and
+[examples/zelda](examples/zelda) has the launchers of a real cartridge.
+
+Steam games work differently. A cartridge can hold a Steam library, and **Game cartridge…** moves an
+installed Steam game there with Steam's own "Move install folder", so Steam keeps handling updates.
+On another machine the game still needs your account or Family Sharing, and the library has to be
+added once in Steam's storage settings. While the cartridge is unplugged, these games show as not
+installed instead of disappearing. This part has had the least testing.
+
+## Status
+
+Version 0.1.0, tested on a Bazzite PC so far. Reports from SteamOS and the Steam Deck are welcome,
+and so are bug reports and pull requests.
+
+## Building
+
+You need Node.js with pnpm, and Python 3.
 
 ```bash
 pnpm install
 pnpm run build
-python3 tools/package.py          # out/game-cartridges.zip, Decky's plugin layout
+python3 tools/package.py
 ```
 
-`tools/install.sh` builds, copies the zip to a machine and installs it through Decky's own installer,
-confirming Decky's prompt over Steam's debug port. It needs an SSH tunnel to that port:
+That writes `out/game-cartridges.zip`. `tools/install.sh` builds the zip, copies it to a machine and
+installs it through Decky's own installer. It confirms Decky's prompt over Steam's debug port, so it
+needs an SSH tunnel to that port:
 
 ```bash
 ssh -N -L 18090:127.0.0.1:8080 user@machine
@@ -78,9 +110,18 @@ ssh -N -L 18090:127.0.0.1:8080 user@machine
 HOST=user@machine tools/install.sh
 ```
 
-The plugin's backend runs as root (Decky's `root` flag) so it can format drives; everything it writes
-on a cartridge or in your home folder is written as your user. Steam shortcuts are only ever added
-by the agent, so the plugin and the agent never both add the same game.
+The repository has three parts. The Decky plugin (`main.py`, `backend/`, `src/`) formats drives and
+manages cartridges. `cartridge/` is what every cartridge carries: the launcher helpers in `lib.sh`,
+and the agent, which is the service that adds and hides games in Steam. `tools/format-cartridge.sh`
+makes a cartridge from a shell, without the plugin.
 
-Logs: Decky's plugin log (`~/homebrew/logs/game-cartridges/`), and the agent's
-`journalctl --user -u game-cartridges`.
+The plugin's backend runs as root so it can format drives. Everything it writes on a cartridge or in
+your home folder is written as your user. Only the agent adds Steam shortcuts, so the plugin and the
+agent never add the same game twice.
+
+Logs are in `~/homebrew/logs/game-cartridges/` for the plugin, and in
+`journalctl --user -u game-cartridges` for the agent.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
