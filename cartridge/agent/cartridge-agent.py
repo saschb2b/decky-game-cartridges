@@ -6,29 +6,49 @@ It watches the mount table, and talks to the running Steam client over its local
 (127.0.0.1:8080, the one Decky Loader uses too) to add and remove non-Steam shortcuts live, with the
 cartridge's artwork. Nothing on the cartridge runs until you press Play on one of its games.
 
-State (which shortcut belongs to which cartridge): ~/.local/share/game-cartridges/agent-state.json
+One Steam shortcut per game id: when a game moves to another cartridge (or to this machine's home
+cartridge, ~/Games/HomeCartridge) its shortcut follows it and keeps its app id, play time and
+controller layout. When a game is on several plugged-in cartridges, the home copy wins, then the copy
+the shortcut already points at.
+
+State (game id -> shortcut): ~/.local/share/game-cartridges/agent-state.json
 Log: journalctl --user -u game-cartridges
+Re-reads the manifests every 3 s; `kill -USR1 <pid>` (the Decky plugin does this) checks right away.
 """
 import base64
 import json
 import os
 import select
+import signal
 import socket
 import sys
 import time
 import urllib.request
 
+AGENT_VERSION = 2
 DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "game-cartridges")
 STATE_FILE = os.path.join(DATA, "agent-state.json")
+HOME_CARTRIDGE = os.path.expanduser("~/Games/HomeCartridge")
 CDP_LIST = "http://127.0.0.1:8080/json"
 MOUNT_ROOTS = ("/run/media/", "/media/", "/mnt/", "/var/run/media/")
 # Steam's custom artwork slots: portrait capsule, hero, logo, wide capsule.
 ART = (("portrait.png", 0), ("hero.png", 1), ("logo.png", 2), ("horizontal.png", 3))
-RECHECK_SECONDS = 10
+POLL_SECONDS = 3
 
 
 def log(*parts):
     print(*parts, flush=True)
+
+
+_last_wait = None
+
+
+def log_wait(message):
+    """Log a 'waiting for Steam' reason once, not on every retry."""
+    global _last_wait
+    if message != _last_wait:
+        _last_wait = message
+        log(message)
 
 
 # ---- mounts and manifests --------------------------------------------------------------------------
@@ -72,14 +92,26 @@ def read_manifest(mp):
     return {"id": str(manifest.get("id") or os.path.basename(mp)), "name": manifest.get("name", ""), "games": games}
 
 
-def wanted_shortcuts():
-    """{key: game} for every game on every mounted cartridge. key = '<cartridge id>|<game id>'."""
-    wanted = {}
-    for mp in mount_points():
+def cartridge_roots():
+    """The home cartridge (when this machine has one) first, then the mounted ones."""
+    roots = [HOME_CARTRIDGE] if os.path.isfile(os.path.join(HOME_CARTRIDGE, "cartridge.json")) else []
+    return roots + sorted(mount_points())
+
+
+def wanted_shortcuts(state):
+    """{game id: game} for every game on the home cartridge and every mounted cartridge. A game found on
+    several of them: the home copy, else the copy its shortcut already points at, else the first."""
+    copies = {}
+    for mp in cartridge_roots():
         manifest = read_manifest(mp)
         if manifest:
             for game in manifest["games"]:
-                wanted.setdefault(f"{manifest['id']}|{game['id']}", dict(game, cartridge=manifest["id"], mount=mp))
+                copies.setdefault(game["id"], []).append(dict(game, cartridge=manifest["id"], mount=mp))
+    wanted = {}
+    for gid, found in copies.items():
+        current = state["shortcuts"].get(gid, {}).get("exe")
+        wanted[gid] = next((g for g in found if g["mount"] == HOME_CARTRIDGE), None) \
+            or next((g for g in found if g["exe"] == current), found[0])
     return wanted
 
 
@@ -232,9 +264,26 @@ def add_shortcut(steam, game):
 def load_state():
     try:
         with open(STATE_FILE) as f:
-            return json.load(f)
+            state = json.load(f)
     except (OSError, ValueError):
-        return {"shortcuts": {}}
+        state = {"shortcuts": {}}
+    return migrate_state(state)
+
+
+def migrate_state(state):
+    """Agent 1 kept one shortcut per '<cartridge id>|<game id>'; agent 2 keeps one per game id. The same
+    game on two cartridges had two shortcuts: the first stays, the others are hidden ('orphans')."""
+    shortcuts, orphans = {}, list(state.get("orphans", []))
+    for key, entry in sorted(state.get("shortcuts", {}).items(), key=lambda kv: (kv[1].get("hidden", False), kv[0])):
+        gid = key.split("|", 1)[1] if "|" in key else key
+        if gid in shortcuts:
+            orphans.append(entry["appid"])
+        else:
+            shortcuts[gid] = entry
+    state["shortcuts"], state["version"] = shortcuts, AGENT_VERSION
+    if orphans:
+        state["orphans"] = orphans
+    return state
 
 
 def save_state(state):
@@ -249,28 +298,35 @@ def _in_sync(state, wanted):
     have = state["shortcuts"]
     for key, game in wanted.items():
         entry = have.get(key)
-        if not entry or entry.get("hidden") or entry["exe"] != game["exe"]:
+        if not entry or entry.get("hidden") or entry["exe"] != game["exe"] or entry["title"] != game["title"]:
             return False
-    return all(entry.get("hidden") for key, entry in have.items() if key not in wanted)
+    return not state.get("orphans") and all(entry.get("hidden") for key, entry in have.items() if key not in wanted)
 
 
 def reconcile(state):
     """Make Steam match the mounted cartridges: their games shown, games of absent cartridges hidden.
     Hiding (not deleting) keeps each game's Steam entry, play time and settings for the next time the
     cartridge is plugged in. Returns True when nothing is left to do."""
-    wanted = wanted_shortcuts()
+    wanted = wanted_shortcuts(state)
     have = state["shortcuts"]
     if _in_sync(state, wanted) and not state.get("verify"):
         return True
     try:
         steam = Steam()
     except SteamUnavailable as e:
-        log(f"waiting for Steam: {e}")
+        log_wait(f"waiting for Steam: {e}")
         return False
     try:
         if not steam.eval(JS_READY):
-            log("waiting for Steam's library to load")
+            log_wait("waiting for Steam's library to load")
             return False
+        for appid in list(state.get("orphans", [])):
+            if steam.eval(JS_EXISTS.format(appid=appid)) and not steam.eval(JS_HIDDEN.format(appid=appid)):
+                steam.eval(JS_SET_HIDDEN.format(appid=appid, hidden="true"))
+                log(f"hid duplicate shortcut {appid} (one shortcut per game now)")
+            state["orphans"].remove(appid)
+            save_state(state)
+        state.pop("orphans", None)
         for key in sorted(set(have) - set(wanted)):
             entry = have[key]
             if not steam.eval(JS_EXISTS.format(appid=entry["appid"])):
@@ -278,7 +334,7 @@ def reconcile(state):
             elif not entry.get("hidden") or not steam.eval(JS_HIDDEN.format(appid=entry["appid"])):
                 steam.eval(JS_SET_HIDDEN.format(appid=entry["appid"], hidden="true"))
                 entry["hidden"] = True
-                log(f"hid {entry['title']!r} (appid {entry['appid']}): cartridge {entry['cartridge']} is not plugged in")
+                log(f"hid {entry['title']!r} (appid {entry['appid']}): no plugged-in cartridge has it")
             save_state(state)
         for key, game in sorted(wanted.items()):
             entry = have.get(key)
@@ -287,7 +343,10 @@ def reconcile(state):
                 if entry["exe"] != game["exe"]:
                     steam.eval(f"SteamClient.Apps.SetShortcutExe({appid}, {json.dumps(json.dumps(game['exe']))})")
                     steam.eval(f"SteamClient.Apps.SetShortcutStartDir({appid}, {json.dumps(json.dumps(game['dir']))})")
-                    log(f"{game['title']!r}: cartridge now at {game['mount']}")
+                    log(f"{game['title']!r}: now runs from cartridge {game['cartridge']} at {game['mount']}")
+                if entry["title"] != game["title"]:
+                    steam.eval(f"SteamClient.Apps.SetShortcutName({appid}, {json.dumps(game['title'])})")
+                    log(f"renamed {entry['title']!r} to {game['title']!r} (appid {appid})")
                 if entry.get("hidden") or steam.eval(JS_HIDDEN.format(appid=appid)):
                     steam.eval(JS_SET_HIDDEN.format(appid=appid, hidden="false"))
                     log(f"showed {game['title']!r} (appid {appid}) from cartridge {game['cartridge']} at {game['mount']}")
@@ -299,9 +358,11 @@ def reconcile(state):
             save_state(state)
         state.pop("verify", None)
         save_state(state)
+        global _last_wait
+        _last_wait = None
         return True
     except (SteamUnavailable, OSError, RuntimeError) as e:
-        log(f"Steam call failed, retrying: {e}")
+        log_wait(f"Steam call failed, retrying: {e}")
         return False
     finally:
         steam.close()
@@ -310,26 +371,41 @@ def reconcile(state):
 def main():
     state = load_state()
     state["verify"] = True  # after a restart (or Steam's), check that our shortcuts still exist
-    log(f"game cartridges agent: watching {', '.join(MOUNT_ROOTS)}")
+    log(f"game cartridges agent {AGENT_VERSION}: watching {HOME_CARTRIDGE} and {', '.join(MOUNT_ROOTS)}")
     mountinfo = open("/proc/self/mountinfo")
     poller = select.poll()
     poller.register(mountinfo, select.POLLPRI | select.POLLERR)
-    done = False
+    # SIGUSR1 (sent by the Decky plugin after it changed a cartridge): check now, and verify Steam.
+    wake_r, wake_w = os.pipe()
+    os.set_blocking(wake_r, False)
+    os.set_blocking(wake_w, False)
+    signal.set_wakeup_fd(wake_w)
+    signal.signal(signal.SIGUSR1, lambda *_: None)
+    poller.register(wake_r, select.POLLIN)
     last_steam_pid = None
     while True:
         steam_pid = _steam_pid()
         if steam_pid != last_steam_pid:
             last_steam_pid = steam_pid
-            state["verify"] = True  # Steam (re)started: shortcuts may need checking
-            done = False
-        if not done:
-            done = reconcile(state)
-        events = poller.poll(RECHECK_SECONDS * 1000 if done else 3000)
-        if events:
-            mountinfo.seek(0)
-            mountinfo.read()
-            time.sleep(1.5)  # let the automounter finish (and the filesystem settle) before reading
-            done = False
+            state["verify"] = True  # Steam (re)started: check our shortcuts again
+        # A check with nothing to do only reads the mount table and the manifests (no Steam connection),
+        # so manifest edits are picked up too. The mount table and SIGUSR1 wake us early.
+        reconcile(state)
+        events = poller.poll(POLL_SECONDS * 1000)
+        for fd, _ in events:
+            if fd == wake_r:
+                while True:
+                    try:
+                        if not os.read(wake_r, 64):
+                            break
+                    except BlockingIOError:
+                        break
+                state["verify"] = True
+                log("checking now (asked by signal)")
+            else:
+                mountinfo.seek(0)
+                mountinfo.read()
+                time.sleep(1.5)  # let the automounter finish before reading the cartridge
 
 
 def _steam_pid():

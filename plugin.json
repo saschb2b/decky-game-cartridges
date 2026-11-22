@@ -1,0 +1,11 @@
+{
+  "name": "Game Cartridges",
+  "author": "Saschb2b",
+  "flags": ["root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["storage", "usb", "library"],
+    "description": "USB SSDs as game cartridges: format them, carry games between machines, copy and move games.",
+    "image": ""
+  }
+}
