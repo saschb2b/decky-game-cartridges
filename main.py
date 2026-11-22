@@ -452,18 +452,21 @@ async def wait_for_mount(part, seconds=25):
 
 
 async def mount_partition(part, label):
-    """Mount the way the OS auto-mounts (udev add event -> SteamOS/Bazzite automount -> /run/media/<user>/<label>)."""
+    """Mount the way the OS auto-mounts a plugged-in drive (SteamOS/Bazzite's steamos-automount: udisks,
+    /run/media/<user>/<label>, the user's mount options). Its udev handler ignores synthetic add events
+    ("not inserted recently"), so the script is called directly; a udev event and a plain mount are
+    fallbacks for other systems."""
     name = os.path.basename(part)
-    await run("udevadm", "trigger", "--action=add", f"/sys/class/block/{name}")
-    mp = await wait_for_mount(part, 15)
-    if mp:
-        return mp
     for script in ("/usr/libexec/hwsupport/steamos-automount.sh", "/usr/lib/hwsupport/steamos-automount.sh"):
         if os.path.exists(script):
             await run(script, "add", name, timeout=60)
-            mp = await wait_for_mount(part, 10)
+            mp = await wait_for_mount(part, 5)
             if mp:
                 return mp
+    await run("udevadm", "trigger", "--action=add", f"/sys/class/block/{name}")
+    mp = await wait_for_mount(part, 8)
+    if mp:
+        return mp
     mp = f"/run/media/{USER}/{label}"
     os.makedirs(mp, exist_ok=True)
     code, _, err = await run("mount", "-o", "rw,noatime,lazytime", part, mp)
@@ -555,7 +558,8 @@ class Plugin:
     async def read_image(self, path):
         """An image the user picked (for a cover), as a data URL. Only from the home folder or a drive."""
         real = os.path.realpath(path)
-        if not (real.startswith(str(HOME) + os.sep) or real.startswith(MOUNT_ROOTS)):
+        home = os.path.realpath(HOME)  # /home is a symlink to /var/home on Bazzite and SteamOS
+        if not (real.startswith(home + os.sep) or real.startswith(MOUNT_ROOTS)):
             return None
         return self._data_url(real)
 
@@ -607,6 +611,8 @@ class Plugin:
                 code, _, err = await run("e2label", source, make_label(name))
                 if code != 0:
                     log.warning(f"e2label {source}: {err}")
+                # The kernel sends no uevent for a relabel; refresh udev's view (lsblk, by-label).
+                await run("udevadm", "trigger", "--action=change", f"/sys/class/block/{os.path.basename(source)}")
         return True
 
     async def set_steam_library(self, mount):

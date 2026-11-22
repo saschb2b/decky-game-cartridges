@@ -1,6 +1,7 @@
 // Drive Steam's CEF over its remote debugging port (through an SSH tunnel):
 //   node tools/deck.mjs eval TARGET 'js expression'
 //   node tools/deck.mjs shot TARGET out.png
+//   node tools/deck.mjs keys TARGET ArrowDown,Enter   |   node tools/deck.mjs type TARGET 'text'
 // TARGET is a page title such as SharedJSContext or QuickAccess_uid2.
 const [, , action, target, arg] = process.argv;
 const base = process.env.CEF ?? "http://127.0.0.1:18080";
@@ -34,6 +35,9 @@ if (action === "eval") {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   console.log("sent", arg);
+} else if (action === "type") {
+  await send("Input.insertText", { text: arg });
+  console.log("typed", arg);
 } else if (action === "shot") {
   const { data } = await send("Page.captureScreenshot", { format: "png" });
   (await import("node:fs")).writeFileSync(arg, Buffer.from(data, "base64"));

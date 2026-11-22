@@ -131,8 +131,10 @@ collections can't have a custom image, so the cover is shown in the plugin (and 
 cartridge for any other tool).
 
 Formatting (also `tools/format-cartridge.sh`): one GPT partition, `mkfs.ext4 -m 0 -O casefold -E
-nodiscard,root_owner=<uid>:<gid> -L <name, max 16 bytes>`, then mounted the way the OS auto-mounts
-(a udev `add` event, so Bazzite's and SteamOS's automount put it at `/run/media/<user>/<label>`).
+nodiscard,root_owner=<uid>:<gid> -L <name, max 16 bytes>`, then mounted the way the OS auto-mounts a
+plugged-in drive: `steamos-automount.sh add <partition>` (Bazzite `/usr/libexec/hwsupport`, SteamOS
+`/usr/lib/hwsupport`), which mounts through udisks at `/run/media/<user>/<label>`. Its udev handler
+skips synthetic `add` events ("not inserted recently"), so the script is called directly.
 The plugin only offers USB disks with no mounts outside `/run/media`, `/media`, `/mnt`, and only
 erases the drive the user confirmed (model, size and partitions are checked again before erasing).
 

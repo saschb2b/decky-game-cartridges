@@ -291,20 +291,15 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
         </div>
         <Buttons>
           {!cart.home && (
-            <Field label="Name" childrenContainerWidth="max">
-              <Focusable style={{ display: "flex", gap: 8 }} flow-children="right">
-                <div style={{ flex: 1 }}>
-                  <TextField value={name} onChange={(e) => setName(e.target.value)} />
-                </div>
-                <DialogButton
-                  style={{ minWidth: 0, width: 90 }}
-                  disabled={busy || !name.trim() || name.trim() === cart.name}
-                  onClick={() => act("Could not rename", () => renameCartridge(cart.mount, name.trim()))}
-                >
-                  Rename
-                </DialogButton>
-              </Focusable>
-            </Field>
+            <>
+              <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} />
+              <DialogButton
+                disabled={busy || !name.trim() || name.trim() === cart.name}
+                onClick={() => act("Could not rename", () => renameCartridge(cart.mount, name.trim()))}
+              >
+                Rename to "{name.trim() || "…"}"
+              </DialogButton>
+            </>
           )}
           <Focusable style={{ display: "flex", gap: 8 }} flow-children="right">
             <DialogButton
@@ -379,6 +374,7 @@ export function FormatModal({ closeModal, drive }: ModalProps & { drive: Drive }
           <div style={{ fontSize: 14, lineHeight: 1.5 }}>
             <div>
               <b>{drive.model}</b> · {fmtBytes(drive.size)} · {drive.dev}
+              {drive.serial && <div style={{ color: "#8b929a", fontSize: 12 }}>Serial {drive.serial}</div>}
             </div>
             <div style={{ marginTop: 6 }}>Everything on it is deleted:</div>
             <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, margin: "4px 0", color: "#dcdedf" }}>{contents(drive)}</pre>
@@ -410,6 +406,7 @@ export function FormatModal({ closeModal, drive }: ModalProps & { drive: Drive }
             <div>
               {drive.model} · {fmtBytes(drive.size)}
             </div>
+            {drive.serial && <div style={muted}>Serial {drive.serial}</div>}
             <div style={{ ...muted, whiteSpace: "pre-wrap" }}>{contents(drive)}</div>
             {drive.speed !== null && drive.speed <= 480 && (
               <div style={{ color: "#ffb347", fontSize: 12 }}>⚠ This port runs at USB 2 speed: formatting works, games load slowly.</div>
@@ -417,9 +414,12 @@ export function FormatModal({ closeModal, drive }: ModalProps & { drive: Drive }
           </div>
         </div>
         <Buttons>
-          <Field label="Name" description="Shown in Steam and as the drive's label" childrenContainerWidth="max">
-            <TextField value={name} onChange={(e) => setName(e.target.value)} />
-          </Field>
+          <TextField
+            label="Name"
+            description="Shown in Steam and as the drive's label"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
           <Focusable style={{ display: "flex", gap: 8 }} flow-children="right">
             <DialogButton
               disabled={busy}
