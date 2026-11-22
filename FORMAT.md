@@ -51,7 +51,8 @@ games/<game id>/
 - `title` is the Steam library name. Steam Input keeps non-Steam controller layouts per name, so
   keep titles stable.
 - Optional fields (readers ignore what they don't know, so the format stays 1): `"cover":
-  "cover.jpg"` (image path on the cartridge), and `"home": true` on a home cartridge (below).
+  "cover.jpg"` (image path on the cartridge, the label art), `"color": "#d1a23a"` (the shell colour
+  UIs draw the cartridge in), and `"home": true` on a home cartridge (below).
 - A new cartridge's `id` is its name in lowercase plus four random hex digits (`mario-3f2a`), so two
   friends' cartridges called "Games" don't collide. Renaming changes `name` and the ext4 label, never
   `id`.
