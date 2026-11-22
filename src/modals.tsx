@@ -17,6 +17,7 @@ import {
   Drive,
   eject,
   formatDrive,
+  Holder,
   readImage,
   removeGame,
   renameCartridge,
@@ -256,17 +257,58 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
       setBusy(false);
     }
   };
+  const ejected = () => {
+    toaster.toast({ title: "Game Cartridges", body: `${cart.name} can be unplugged now` });
+    closeModal?.();
+  };
+  const askToClose = (busy: Holder[]) => {
+    const names = [...new Set(busy.map((p) => p.name))];
+    const stuck = busy.filter((p) => !p.closable);
+    showModal(
+      <ConfirmModal
+        strTitle={`${cart.name} is still in use`}
+        strDescription={
+          <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+            <div>These programs still have files open on it:</div>
+            <ul style={{ margin: "6px 0 8px", paddingLeft: 20 }}>
+              {names.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+            {stuck.length > 0 ? (
+              <div style={{ color: "#ffb347" }}>
+                {[...new Set(stuck.map((p) => p.name))].join(", ")} can't be closed from here. Quit it (or the game)
+                first, then eject again.
+              </div>
+            ) : (
+              <div>Close them and eject? A game that is still running loses unsaved progress.</div>
+            )}
+          </div>
+        }
+        strOKButtonText={stuck.length ? "OK" : "Close them and eject"}
+        bOKDisabled={false}
+        onOK={() => {
+          if (stuck.length) return;
+          act("Could not eject", async () => {
+            const result = await eject(cart.mount, true);
+            if (result.ok) ejected();
+            else askToClose(result.busy);
+          });
+        }}
+      />,
+    );
+  };
   const doEject = () =>
     showModal(
       <ConfirmModal
         strTitle={`Eject ${cart.name}?`}
-        strDescription="Its games are hidden in Steam until you plug it in again. Close any game running from it first."
+        strDescription="Its games are hidden in Steam until you plug it in again."
         strOKButtonText="Eject"
         onOK={() =>
           act("Could not eject", async () => {
-            await eject(cart.mount);
-            toaster.toast({ title: "Game Cartridges", body: `${cart.name} can be unplugged now` });
-            closeModal?.();
+            const result = await eject(cart.mount, false);
+            if (result.ok) ejected();
+            else askToClose(result.busy);
           })
         }
       />,

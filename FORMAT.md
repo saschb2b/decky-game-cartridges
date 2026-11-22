@@ -138,6 +138,11 @@ skips synthetic `add` events ("not inserted recently"), so the script is called 
 The plugin only offers USB disks with no mounts outside `/run/media`, `/media`, `/mnt`, and only
 erases the drive the user confirmed (model, size and partitions are checked again before erasing).
 
+Ejecting: the plugin first looks for programs that keep the drive busy (open files, working folder,
+program or mapped library on it, like `fuser -m`). It lists them and closes the user's own ones only
+when asked (Dusklight's `crashpad_handler`, for one, can outlive the game); Steam and the session are
+never closed. Then it unmounts and powers the drive off.
+
 ## Steam games
 
 A cartridge can carry a Steam library: `SteamLibrary/` at its root, added in Steam

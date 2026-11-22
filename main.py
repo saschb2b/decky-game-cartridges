@@ -475,6 +475,87 @@ async def mount_partition(part, label):
     return mp
 
 
+# Never offered for closing: Steam and the session itself.
+PROTECTED = {"steam", "steamwebhelper", "gamescope", "gamescope-wl", "gamescope-sessi", "Xwayland", "kwin_wayland",
+             "plasmashell", "PluginLoader", "systemd", "dbus-daemon", "dbus-broker", "udisksd"}
+
+
+def disk_mounts(disk):
+    return [mp for part in [*(disk.get("children") or []), disk] for mp in mountpoints(part)]
+
+
+def holders(mps):
+    """Processes that keep a drive busy: an open file, working folder, program or mapped library under
+    one of the mount points (what fuser -m finds). [{pid, name, uid, cmd, closable}]"""
+    prefixes = tuple(mp.rstrip("/") + "/" for mp in mps)
+
+    def under(path):
+        return path in mps or path.startswith(prefixes)
+
+    found = []
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit() or int(pid) == os.getpid():
+            continue
+        base = f"/proc/{pid}"
+        hit = False
+        for link in ("cwd", "exe", "root"):
+            try:
+                hit = hit or under(os.readlink(f"{base}/{link}"))
+            except OSError:
+                pass
+        if not hit:
+            try:
+                for fd in os.listdir(f"{base}/fd"):
+                    try:
+                        if under(os.readlink(f"{base}/fd/{fd}")):
+                            hit = True
+                            break
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+        if not hit:
+            try:
+                with open(f"{base}/maps") as f:
+                    for line in f:
+                        fields = line.split(None, 5)
+                        if len(fields) == 6 and under(fields[5].rstrip("\n")):
+                            hit = True
+                            break
+            except OSError:
+                pass
+        if not hit:
+            continue
+        try:
+            name = Path(f"{base}/comm").read_text().strip()
+            uid = os.stat(base).st_uid
+            cmd = Path(f"{base}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+        except OSError:
+            continue
+        found.append({"pid": int(pid), "name": name, "uid": uid, "cmd": cmd[:200],
+                      "closable": uid == UID and name not in PROTECTED})
+    return found
+
+
+async def close_holders(busy):
+    pids = [p["pid"] for p in busy]
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    for _ in range(20):
+        if not any(os.path.exists(f"/proc/{pid}") for pid in pids):
+            return
+        await asyncio.sleep(0.25)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    await asyncio.sleep(1)
+
+
 async def unmount_disk(disk):
     await run("sync", timeout=300)
     for part in [*(disk.get("children") or []), disk]:
@@ -483,8 +564,8 @@ async def unmount_disk(disk):
                 raise RuntimeError(f"{part['path']} is mounted at {mp}; refusing")
             code, _, err = await run("umount", mp, timeout=60)
             if code != 0:
-                _, users, _ = await run("fuser", "-vm", mp, timeout=10)
-                raise RuntimeError(f"{mp} is busy (is a game from it still running?): {err} {users}".strip())
+                names = ", ".join(sorted({p["name"] for p in holders([mp])})) or err
+                raise RuntimeError(f"{mp} is still in use by {names}")
 
 
 # ---- plugin API ---------------------------------------------------------------------------------------
@@ -622,18 +703,27 @@ class Plugin:
         await worker("mkdir", path)
         return path
 
-    async def eject(self, mount):
+    async def eject(self, mount, close_programs=False):
+        """Unmounts and powers off a cartridge. When programs still use it (a game, or one that outlived
+        it such as Dusklight's crashpad_handler), returns them instead, unless close_programs is set:
+        then the user's own programs among them are closed first. Steam and the session never are."""
         devices = await lsblk()
         source = next((src for m, src in mounts() if m == mount), None)
         disk = disk_of(devices, source) if source else None
         if not disk or disk.get("tran") != "usb":
             raise RuntimeError(f"{mount} is not on a USB drive")
+        busy = holders(disk_mounts(disk))
+        if busy:
+            if not close_programs or not all(p["closable"] for p in busy):
+                return {"ok": False, "busy": busy}
+            log.info(f"closing for eject: {[(p['pid'], p['name']) for p in busy]}")
+            await close_holders(busy)
         await unmount_disk(disk)
         await poke_agent()
         code, _, err = await run("udisksctl", "power-off", "-b", disk["path"], "--no-user-interaction", timeout=30)
         if code != 0:
             log.warning(f"power-off {disk['path']}: {err}")
-        return True
+        return {"ok": True, "busy": []}
 
     async def install_agent(self):
         code, out, err = await run("bash", RUNTIME_SRC / "agent" / "install.sh", as_user=True, timeout=60)

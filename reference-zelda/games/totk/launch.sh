@@ -11,6 +11,12 @@ DATA=$(cart_data totk)
 level=$(cart_cpu_level)
 [[ $level != base ]] || { echo "TotK Recomp needs an x86-64-v3 CPU (AVX2)" >&2; exit 1; }
 mkdir -p "$DATA/profile" "$DATA/mesa-cache" "$DATA/screenshots"
+# TOTK_PIPELINE_CACHE also moves the list of known pipelines (pipeline-keys.bin) and the shader
+# answers/programs next to it. Seed them from the cartridge so a new machine builds the known
+# pipelines at start instead of stuttering through them in play.
+for f in pipeline-keys.bin shader-answers.bin shader-programs.bin; do
+    [[ -e $DATA/$f || ! -e $GAME/app/$f ]] || cp "$GAME/app/$f" "$DATA/$f"
+done
 cart_session_env
 # XWayland exposes the focused game window to Steam Input in Gamescope.
 if [[ "${XDG_CURRENT_DESKTOP,,}" == gamescope || -n "${GAMESCOPE_WAYLAND_DISPLAY:-}" ]]; then
