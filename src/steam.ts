@@ -32,6 +32,22 @@ export function portraitURL(appid: number | null): string | null {
   return null;
 }
 
+/** A wide image for a game (hero, else wide capsule, else box art) for a cartridge label without art. */
+export function wideURL(appid: number | null): string | null {
+  if (!appid) return null;
+  const o = overview(appid);
+  if (!o) return null;
+  try {
+    for (const get of ["GetCustomHeroImageURLs", "GetCustomLandcapeImageURLs"]) {
+      const urls = appStore[get]?.(o);
+      if (urls?.length) return urls[0];
+    }
+  } catch {
+    /* artwork is optional */
+  }
+  return portraitURL(appid);
+}
+
 function savedCollections(): Record<string, string> {
   try {
     return JSON.parse(localStorage.getItem(COLLECTIONS_KEY) || "{}");

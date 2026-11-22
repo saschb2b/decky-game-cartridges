@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Cartridge, getCover } from "./api";
 import { ReactNode } from "react";
 import { CartGlyph, CartridgeCard, shellOf } from "./kit";
+import { wideURL } from "./steam";
 
 const coverCache = new Map<string, string | null>();
 
@@ -33,11 +34,13 @@ export function useCover(cart: Cartridge | null | undefined) {
 /** A cartridge (or this machine) as its card: label with the cover art, free space, and children. */
 export function CartCard({ cart, children, width, labelHeight, name }: { cart: Cartridge; children?: ReactNode; width?: number | string; labelHeight?: number; name?: string }) {
   const cover = useCover(cart);
+  // No label art chosen: the first game's hero image stands in.
+  const art = cover ?? (cart.home ? null : cart.games.map((g) => wideURL(g.appid)).find(Boolean) ?? null);
   return (
     <CartridgeCard
       name={name ?? cart.name}
       shell={shellOf(cart)}
-      art={cover}
+      art={art}
       kind={cart.home ? "home" : "cartridge"}
       tag={cart.home ? "INTERNAL" : speedText(cart.speed)?.split(" · ")[0]}
       free={cart.free}
