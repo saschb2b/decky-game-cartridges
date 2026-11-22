@@ -1,402 +1,250 @@
-// The plugin's visual language: cartridges drawn as cartridges (grip ridges, a label sticker carrying the
-// cover art, an edge connector), the machine's internal storage as a console base, numbers on an inset
-// vacuum-fluorescent readout with unlit segments showing, and games as box-art tiles.
+// One visual idea, used everywhere: a cartridge is a card moulded like a cartridge. Its plastic is the
+// shell colour, grip ridges sit at the top, the label sticker carries the cover art and the name, the
+// games sit on the plastic below it, and the edge connector closes the bottom. Everything else
+// (buttons, text, focus) stays Steam's own.
 import { Focusable } from "@decky/ui";
-import { CSSProperties, ReactNode, useMemo } from "react";
+import { CSSProperties, ReactNode } from "react";
 import type { Cartridge } from "./api";
 
-// ---- plastics -------------------------------------------------------------------------------------------
-
 export const SHELLS: { name: string; hex: string }[] = [
-  { name: "Graphite", hex: "#2e3138" },
-  { name: "Bone", hex: "#cfc8b8" },
-  { name: "Ice", hex: "#8fb3c9" },
-  { name: "Moss", hex: "#4f7a5b" },
-  { name: "Grape", hex: "#5d4a8a" },
-  { name: "Brick", hex: "#b4473b" },
-  { name: "Mustard", hex: "#d1a23a" },
-  { name: "Ocean", hex: "#2f5f8f" },
+  { name: "Graphite", hex: "#33363d" },
+  { name: "Bone", hex: "#cdc6b6" },
+  { name: "Ice", hex: "#8eafc4" },
+  { name: "Moss", hex: "#4d765a" },
+  { name: "Grape", hex: "#5c4a87" },
+  { name: "Brick", hex: "#a9453a" },
+  { name: "Mustard", hex: "#c99a36" },
+  { name: "Ocean", hex: "#2e5a86" },
 ];
+
+export const HOME_SHELL = "#2b2e34";
+export const BLANK_SHELL = "#3a3d44";
 
 export function shellOf(cart: Pick<Cartridge, "id" | "color" | "home">): string {
   if (cart.color) return cart.color;
-  if (cart.home) return "#2a2d33";
+  if (cart.home) return HOME_SHELL;
   const sum = [...(cart.id || "x")].reduce((a, c) => a + c.charCodeAt(0), 0);
   return SHELLS[sum % SHELLS.length].hex;
 }
 
-function luminance(hex: string) {
+/** Text and line colours that read on a given plastic. */
+export function inkFor(hex: string) {
   const n = parseInt(hex.slice(1), 16);
   const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5;
+  return light
+    ? { text: "#18191c", muted: "rgba(0,0,0,.58)", track: "rgba(0,0,0,.16)", fill: "rgba(0,0,0,.62)", ridge: "rgba(0,0,0,.22)", light }
+    : { text: "#f3f4f6", muted: "rgba(255,255,255,.64)", track: "rgba(255,255,255,.14)", fill: "rgba(255,255,255,.78)", ridge: "rgba(0,0,0,.38)", light };
 }
 
-// ---- the cartridge --------------------------------------------------------------------------------------
+const CHAMFER = 16;
+const BEVEL = 4;
 
-type CartridgeArtProps = {
+// ---- the cartridge card ---------------------------------------------------------------------------------
+
+export type CardProps = {
   name: string;
   shell: string;
   art?: string | null;
-  blank?: boolean;
-  width?: number;
-  style?: CSSProperties;
+  /** Right side of the label strip, e.g. "USB 3". */
+  tag?: ReactNode;
+  /** A blank drive (no label yet), or the machine's own storage (no connector, power light). */
+  kind?: "cartridge" | "blank" | "home";
+  /** Free space line and bar; omitted when free is undefined. */
+  free?: number;
+  total?: number;
+  children?: ReactNode;
+  width?: number | string;
+  labelHeight?: number;
 };
 
-/** A cartridge, 100 x 128 units. The label sticker is HTML on top so long names and the art crop well. */
-export function CartridgeArt({ name, shell, art, blank, width = 80, style }: CartridgeArtProps) {
-  const id = useMemo(() => `gc${Math.round(Math.random() * 1e9)}`, []);
-  const light = luminance(shell) > 0.55;
-  const ink = light ? "rgba(0,0,0,.32)" : "rgba(0,0,0,.45)";
-  const shine = light ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.16)";
-  const pins = Array.from({ length: 20 }, (_, i) => 15.5 + i * 3.5);
+export function CartridgeCard({
+  name,
+  shell,
+  art,
+  tag,
+  kind = "cartridge",
+  free,
+  total,
+  children,
+  width = "100%",
+  labelHeight = 104,
+}: CardProps) {
+  const ink = inkFor(shell);
+  const removable = kind !== "home";
+  const clip = removable
+    ? `polygon(${BEVEL}px 0, calc(100% - ${CHAMFER}px) 0, 100% ${CHAMFER}px, 100% calc(100% - ${BEVEL}px), calc(100% - ${BEVEL}px) 100%, ${BEVEL}px 100%, 0 calc(100% - ${BEVEL}px), 0 ${BEVEL}px)`
+    : undefined;
   return (
-    <div style={{ position: "relative", width, height: width * 1.28, flex: "none", ...style }}>
-      <svg viewBox="0 0 100 128" width={width} height={width * 1.28} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
-        <defs>
-          <linearGradient id={`${id}s`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#fff" stopOpacity={light ? 0.22 : 0.12} />
-            <stop offset="0.45" stopColor="#fff" stopOpacity="0" />
-            <stop offset="1" stopColor="#000" stopOpacity="0.28" />
-          </linearGradient>
-          <linearGradient id={`${id}p`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#f3d98b" />
-            <stop offset="1" stopColor="#a8822f" />
-          </linearGradient>
-          <filter id={`${id}d`} x="-20%" y="-20%" width="140%" height="150%">
-            <feDropShadow dx="0" dy="3" stdDeviation="2.6" floodColor="#000" floodOpacity="0.55" />
-          </filter>
-        </defs>
-        {/* body with the chamfered corner */}
-        <path
-          d="M5 0 H86 L100 14 V123 Q100 128 95 128 H5 Q0 128 0 123 V5 Q0 0 5 0 Z"
-          fill={shell}
-          filter={`url(#${id}d)`}
-        />
-        <path d="M5 0 H86 L100 14 V123 Q100 128 95 128 H5 Q0 128 0 123 V5 Q0 0 5 0 Z" fill={`url(#${id}s)`} />
-        <path d="M5 0.7 H85.7 L99.3 14.3" fill="none" stroke={shine} strokeWidth="0.8" />
-        {/* grip ridges */}
-        {[4.2, 7.4, 10.6, 13.8].map((y) => (
-          <g key={y}>
-            <rect x="8" y={y} width="62" height="1.5" rx="0.75" fill={ink} />
-            <rect x="8" y={y + 1.5} width="62" height="0.6" rx="0.3" fill={shine} />
-          </g>
-        ))}
-        {/* label recess */}
-        <rect x="7" y="19" width="86" height="90" rx="3.5" fill="#000" opacity="0.28" />
-        <rect x="7.5" y="108" width="85" height="0.8" rx="0.4" fill={shine} />
-        {/* insert arrow */}
-        <path d="M45 112.5 H55 L50 117 Z" fill={ink} />
-        <path d="M45.8 113.1 H54.2" stroke={shine} strokeWidth="0.4" />
-        {/* edge connector */}
-        <path d="M12 128 V121.5 Q12 120 13.5 120 H86.5 Q88 120 88 121.5 V128 Z" fill="#000" opacity="0.6" />
-        {pins.map((x) => (
-          <rect key={x} x={x} y="121.6" width="1.9" height="6.4" rx="0.3" fill={`url(#${id}p)`} />
-        ))}
-      </svg>
-      {/* label sticker */}
+    <div style={{ width, filter: "drop-shadow(0 4px 10px rgba(0,0,0,.45))" }}>
       <div
         style={{
-          position: "absolute",
-          left: "9%",
-          top: `${(21 / 128) * 100}%`,
-          width: "82%",
-          height: `${(86 / 128) * 100}%`,
-          borderRadius: width * 0.025,
-          overflow: "hidden",
-          background: blank ? "transparent" : "#f1ece1",
-          border: blank ? `${Math.max(1, width / 80)}px dashed rgba(255,255,255,.35)` : "none",
-          boxSizing: "border-box",
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: blank ? "none" : "0 0 0 0.5px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.5)",
+          position: "relative",
+          background: `linear-gradient(180deg, rgba(255,255,255,${ink.light ? 0.16 : 0.07}), rgba(255,255,255,0) 40%, rgba(0,0,0,.14)), ${shell}`,
+          clipPath: clip,
+          borderRadius: removable ? 0 : 8,
+          color: ink.text,
+          padding: "18px 10px 0",
         }}
       >
-        {blank ? (
+        {/* grip ridges */}
+        <div
+          style={{
+            position: "absolute",
+            top: 5,
+            left: 12,
+            width: "34%",
+            height: 8,
+            background: `repeating-linear-gradient(180deg, ${ink.ridge} 0 1.5px, transparent 1.5px 3.2px)`,
+            borderRadius: 1,
+          }}
+        />
+        {kind === "home" && (
           <div
-            style={{
-              margin: "auto",
-              color: "rgba(255,255,255,.55)",
-              fontSize: Math.max(8, width * 0.1),
-              fontWeight: 800,
-              letterSpacing: "0.18em",
-            }}
-          >
-            BLANK
-          </div>
-        ) : (
-          <>
-            <div style={{ flex: 1, minHeight: 0, background: "#1c1f24", position: "relative" }}>
-              {art ? (
-                <img src={art} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-              ) : (
-                <LabelPattern name={name} shell={shell} size={width} />
-              )}
+            style={{ position: "absolute", top: 6, right: 12, width: 6, height: 6, borderRadius: 3, background: "#6ee7c8", boxShadow: "0 0 6px #6ee7c8" }}
+          />
+        )}
+        <Label name={name} art={art} tag={tag} kind={kind} height={labelHeight} />
+        {free !== undefined && total !== undefined && (
+          <div style={{ marginTop: 9 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: ink.muted, fontVariantNumeric: "tabular-nums" }}>
+              <span>
+                <b style={{ color: ink.text, fontWeight: 700 }}>{gb(free)}</b> free
+              </span>
+              <span>of {gb(total)}</span>
             </div>
-            {width >= 48 && <div
+            <div style={{ height: 4, borderRadius: 2, background: ink.track, marginTop: 5, overflow: "hidden" }}>
+              <div
+                style={{ height: 4, width: `${total ? Math.min(100, ((total - free) / total) * 100) : 0}%`, background: ink.fill, borderRadius: 2 }}
+              />
+            </div>
+          </div>
+        )}
+        {children && <div style={{ marginTop: 10 }}>{children}</div>}
+        {removable ? (
+          <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
+            <div
               style={{
-                height: "21%",
-                display: "flex",
-                alignItems: "center",
-                padding: `0 ${width * 0.05}px`,
-                color: "#16171a",
-                fontSize: Math.max(7, width * 0.105),
-                fontWeight: 800,
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                lineHeight: 1,
+                width: "62%",
+                height: 7,
+                background: "rgba(0,0,0,.55)",
+                borderRadius: "2px 2px 0 0",
+                padding: "2px 4px 0",
+                boxSizing: "border-box",
               }}
             >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
-            </div>}
-          </>
+              <div style={{ height: "100%", background: "repeating-linear-gradient(90deg, #c9a450 0 2.5px, transparent 2.5px 5px)" }} />
+            </div>
+          </div>
+        ) : (
+          <div style={{ height: 10 }} />
         )}
       </div>
     </div>
   );
 }
 
-/** Label art for a cartridge without a cover: its initial, large, on a halftone field in its shell colour. */
-function LabelPattern({ name, shell, size }: { name: string; shell: string; size: number }) {
-  const initial = (name.trim()[0] || "?").toUpperCase();
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        background: `radial-gradient(rgba(255,255,255,.16) 0.9px, transparent 1.1px) 0 0 / ${Math.max(4, size / 18)}px ${Math.max(4, size / 18)}px, ${shell}`,
-        display: "flex",
-        alignItems: "flex-end",
-        overflow: "hidden",
-      }}
-    >
+function Label({
+  name,
+  art,
+  tag,
+  kind,
+  height,
+}: {
+  name: string;
+  art?: string | null;
+  tag?: ReactNode;
+  kind: CardProps["kind"];
+  height: number;
+}) {
+  if (kind === "blank") {
+    return (
       <div
         style={{
-          fontSize: size * 0.62,
-          fontWeight: 900,
-          lineHeight: 0.78,
-          color: "rgba(255,255,255,.9)",
-          marginLeft: size * 0.04,
-          marginBottom: -size * 0.02,
-          letterSpacing: "-0.04em",
+          height: height + 28,
+          borderRadius: 5,
+          border: "1.5px dashed rgba(255,255,255,.3)",
+          boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 4,
+          color: "rgba(255,255,255,.7)",
         }}
       >
-        {initial}
+        <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: "0.16em" }}>NO LABEL</div>
+        {tag && <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)" }}>{tag}</div>}
+      </div>
+    );
+  }
+  return (
+    <div style={{ borderRadius: 5, overflow: "hidden", background: "#efe9dd", boxShadow: "0 0 0 1px rgba(0,0,0,.28), 0 1px 0 rgba(255,255,255,.12)" }}>
+      {art && (
+        <div style={{ height, background: "#111", overflow: "hidden" }}>
+          <img src={art} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+        </div>
+      )}
+      <div style={{ height: art ? 28 : 36, display: "flex", alignItems: "center", gap: 8, padding: "0 9px", color: "#17181b" }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: art ? 14 : 16,
+            fontWeight: 800,
+            letterSpacing: "0.03em",
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {name || "Untitled"}
+        </div>
+        {tag && <div style={{ flex: "none", fontSize: 11, fontWeight: 700, color: "rgba(0,0,0,.5)", letterSpacing: "0.04em" }}>{tag}</div>}
       </div>
     </div>
   );
 }
 
-/** The machine's own storage: a console base with a cartridge slot and a power light. */
-export function ConsoleArt({ width = 96 }: { width?: number }) {
-  const id = useMemo(() => `gcb${Math.round(Math.random() * 1e9)}`, []);
-  return (
-    <svg viewBox="0 0 120 80" width={width} height={(width * 80) / 120} style={{ flex: "none", overflow: "visible" }}>
-      <defs>
-        <linearGradient id={`${id}t`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#4a4f58" />
-          <stop offset="1" stopColor="#33373e" />
-        </linearGradient>
-        <linearGradient id={`${id}f`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#2c3036" />
-          <stop offset="1" stopColor="#1d2025" />
-        </linearGradient>
-        <filter id={`${id}d`} x="-20%" y="-20%" width="140%" height="160%">
-          <feDropShadow dx="0" dy="3" stdDeviation="2.5" floodColor="#000" floodOpacity="0.55" />
-        </filter>
-        <radialGradient id={`${id}l`}>
-          <stop offset="0" stopColor="#bdfff0" />
-          <stop offset="0.5" stopColor="#5fe8cc" />
-          <stop offset="1" stopColor="#5fe8cc" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <g filter={`url(#${id}d)`}>
-        <path d="M10 18 H110 L118 30 V72 Q118 78 112 78 H8 Q2 78 2 72 V30 Z" fill={`url(#${id}f)`} />
-        <path d="M10 18 H110 L118 30 H2 Z" fill={`url(#${id}t)`} />
-      </g>
-      <path d="M10.4 18.6 H109.6" stroke="rgba(255,255,255,.18)" strokeWidth="0.8" />
-      {/* slot */}
-      <path d="M34 21 H86 L88 27 H32 Z" fill="#0b0c0e" />
-      <path d="M32.6 27 H87.4" stroke="rgba(255,255,255,.12)" strokeWidth="0.6" />
-      {/* vents */}
-      {[0, 1, 2, 3, 4, 5].map((i) => (
-        <rect key={i} x={78 + i * 5.5} y="50" width="2.4" height="18" rx="1.2" fill="#000" opacity="0.45" />
-      ))}
-      {/* power light */}
-      <circle cx="16" cy="44" r="6" fill={`url(#${id}l)`} opacity="0.7" />
-      <circle cx="16" cy="44" r="1.8" fill="#c9fff2" />
-    </svg>
-  );
+export function gb(bytes: number | null | undefined) {
+  if (bytes === null || bytes === undefined) return "…";
+  if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(2)} TB`;
+  if (bytes >= 1e11) return `${Math.round(bytes / 1e9)} GB`;
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  return `${Math.round(bytes / 1e6)} MB`;
 }
 
-// ---- the readout ----------------------------------------------------------------------------------------
+// ---- small pieces ---------------------------------------------------------------------------------------
 
-export const VFD = { lit: "#6ef2d6", dim: "rgba(110,242,214,.58)", ghost: "rgba(110,242,214,.075)", amber: "#ffb547" };
-
-const SEGMENTS: Record<string, string> = {
-  "0": "abcdef", "1": "bc", "2": "abged", "3": "abgcd", "4": "fgbc", "5": "afgcd", "6": "afgedc",
-  "7": "abc", "8": "abcdefg", "9": "abcdfg", "-": "g", " ": "",
-};
-
-function segmentPaths(w: number, h: number, t: number) {
-  const g = t * 0.18;
-  const x0 = t / 2, x1 = w - t / 2, y0 = t / 2, ym = h / 2, y1 = h - t / 2, s = t / 2;
-  const hz = (y: number, a: number, b: number) =>
-    `M${a},${y} L${a + s},${y - s} L${b - s},${y - s} L${b},${y} L${b - s},${y + s} L${a + s},${y + s} Z`;
-  const vt = (x: number, a: number, b: number) =>
-    `M${x},${a} L${x + s},${a + s} L${x + s},${b - s} L${x},${b} L${x - s},${b - s} L${x - s},${a + s} Z`;
-  return {
-    a: hz(y0, x0 + g, x1 - g), g: hz(ym, x0 + g, x1 - g), d: hz(y1, x0 + g, x1 - g),
-    f: vt(x0, y0 + g, ym - g), b: vt(x1, y0 + g, ym - g), e: vt(x0, ym + g, y1 - g), c: vt(x1, ym + g, y1 - g),
-  } as Record<string, string>;
-}
-
-/** Seven-segment digits with the unlit segments faintly visible, like a real display. */
-export function Seg({ text, height = 22, color = VFD.lit }: { text: string; height?: number; color?: string }) {
-  const w = height * 0.54, t = height * 0.13, gap = height * 0.14;
-  const paths = segmentPaths(w, height, t);
-  let x = 0;
-  const parts: ReactNode[] = [];
-  [...text].forEach((ch, i) => {
-    if (ch === ".") {
-      parts.push(<rect key={i} x={x - gap * 0.2} y={height - t} width={t} height={t} rx={t * 0.2} fill={color} />);
-      x += t + gap * 0.5;
-      return;
-    }
-    if (ch === ":") {
-      parts.push(
-        <g key={i} fill={color}>
-          <rect x={x} y={height * 0.28} width={t} height={t} rx={t * 0.2} />
-          <rect x={x} y={height * 0.64} width={t} height={t} rx={t * 0.2} />
-        </g>,
-      );
-      x += t + gap;
-      return;
-    }
-    const lit = SEGMENTS[ch] ?? "";
-    parts.push(
-      <g key={i} transform={`translate(${x},0)`}>
-        {Object.entries(paths).map(([seg, d]) => (
-          <path key={seg} d={d} fill={lit.includes(seg) ? color : VFD.ghost} />
-        ))}
-      </g>,
+/** A cartridge as a small icon in its shell colour, for lists. */
+export function CartGlyph({ shell, home, size = 22 }: { shell: string; home?: boolean; size?: number }) {
+  if (home) {
+    return (
+      <svg width={size} height={size * 1.27} viewBox="0 0 22 28" style={{ flex: "none" }}>
+        <rect x="1" y="6" width="20" height="16" rx="2.5" fill={HOME_SHELL} stroke="rgba(255,255,255,.25)" />
+        <rect x="6" y="9" width="10" height="2" rx="1" fill="#0c0d0f" />
+        <circle cx="5" cy="17" r="1.3" fill="#6ee7c8" />
+      </svg>
     );
-    x += w + gap;
-  });
-  const width = Math.max(1, x - gap);
+  }
   return (
-    <svg
-      width={width + height * 0.12}
-      height={height}
-      viewBox={`0 0 ${width + height * 0.12} ${height}`}
-      style={{ overflow: "visible", filter: `drop-shadow(0 0 ${height * 0.12}px ${color}66)`, flex: "none" }}
-    >
-      <g transform={`skewX(-6) translate(${height * 0.12},0)`}>{parts}</g>
+    <svg width={size} height={size * 1.27} viewBox="0 0 22 28" style={{ flex: "none" }}>
+      <path d="M2 0.5 H17.5 L21.5 4.5 V26.5 Q21.5 27.5 20.5 27.5 H1.5 Q0.5 27.5 0.5 26.5 V2 Q0.5 0.5 2 0.5 Z" fill={shell} stroke="rgba(0,0,0,.35)" />
+      <rect x="3" y="5" width="16" height="15" rx="1.5" fill="#efe9dd" />
+      <rect x="3" y="5" width="16" height="10" rx="1.5" fill="rgba(0,0,0,.28)" />
+      <rect x="5" y="23.5" width="12" height="4" fill="#c9a450" opacity="0.9" />
     </svg>
   );
 }
 
-/** The inset display panel everything numeric sits on. */
-export function Readout({ children, style }: { children: ReactNode; style?: CSSProperties }) {
+/** A game's box art, focusable. */
+export function GameTile({ art, title, onActivate, note }: { art: string | null; title: string; onActivate?: () => void; note?: string }) {
   return (
-    <div
-      style={{
-        background: "linear-gradient(180deg, #081010, #0b1515)",
-        borderRadius: 6,
-        padding: "8px 10px",
-        boxShadow: "inset 0 1px 4px rgba(0,0,0,.9), inset 0 0 0 1px rgba(255,255,255,.035), 0 1px 0 rgba(255,255,255,.06)",
-        color: VFD.lit,
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-/** Small-caps legend text in the display's colour. */
-export function Legend({ children, color = VFD.dim, style }: { children: ReactNode; color?: string; style?: CSSProperties }) {
-  return (
-    <span
-      style={{
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: "0.14em",
-        textTransform: "uppercase",
-        color,
-        fontVariantNumeric: "tabular-nums",
-        ...style,
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-/** A row of display cells, `filled` of `cells` lit. */
-export function Cells({ fraction, cells = 24, color = VFD.lit, height = 6 }: { fraction: number; cells?: number; color?: string; height?: number }) {
-  const on = Math.round(Math.max(0, Math.min(1, fraction)) * cells);
-  return (
-    <div style={{ display: "flex", gap: 2, height }}>
-      {Array.from({ length: cells }, (_, i) => (
-        <div
-          key={i}
-          style={{
-            flex: 1,
-            borderRadius: 1,
-            background: i < on ? color : VFD.ghost,
-            boxShadow: i < on ? `0 0 4px ${color}55` : "none",
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-/** "77.1" + "GB" from bytes, sized for the readout. */
-export function sizeParts(bytes: number | null | undefined): [string, string] {
-  if (bytes === null || bytes === undefined) return ["--", ""];
-  if (bytes >= 1e12) return [(bytes / 1e12).toFixed(2), "TB"];
-  if (bytes >= 1e11) return [Math.round(bytes / 1e9).toString(), "GB"];
-  if (bytes >= 1e9) return [(bytes / 1e9).toFixed(1), "GB"];
-  return [Math.round(bytes / 1e6).toString(), "MB"];
-}
-
-// ---- box-art tiles --------------------------------------------------------------------------------------
-
-export function ArtTile({
-  art,
-  title,
-  caption,
-  onActivate,
-  dim,
-  badge,
-  width,
-}: {
-  art: string | null;
-  title: string;
-  caption?: ReactNode;
-  onActivate?: () => void;
-  dim?: boolean;
-  badge?: ReactNode;
-  width?: number | string;
-}) {
-  return (
-    <div style={{ width, minWidth: 0 }}>
-      <Focusable className="gc-tile" onActivate={onActivate} onClick={onActivate}>
-        <div className="gc-tile-art" style={{ opacity: dim ? 0.45 : 1 }}>
-          {art ? (
-            <img src={art} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-          ) : (
-            <div className="gc-tile-fallback">{title}</div>
-          )}
-          {badge && <div className="gc-tile-badge">{badge}</div>}
-        </div>
-      </Focusable>
-      {caption && <div className="gc-tile-caption">{caption}</div>}
-    </div>
+    <Focusable className="gc-tile" onActivate={onActivate} onClick={onActivate}>
+      {art ? <img src={art} /> : <div className="gc-tile-name">{title}</div>}
+      {note && <div className="gc-tile-note">{note}</div>}
+    </Focusable>
   );
 }
 
@@ -411,32 +259,30 @@ export function Swatches({ value, onChange }: { value: string; onChange: (hex: s
           onClick={() => onChange(s.hex)}
           style={{ background: s.hex }}
         >
-          <span className="gc-swatch-name">{s.name}</span>
+          <span />
         </Focusable>
       ))}
     </Focusable>
   );
 }
 
+export const shellName = (hex: string) => SHELLS.find((s) => s.hex === hex)?.name ?? "Custom";
+
 export const KIT_CSS = `
-.gc-tile { border-radius: 5px; transition: transform .14s ease, box-shadow .14s ease; }
-.gc-tile-art { position: relative; aspect-ratio: 2 / 3; border-radius: 5px; overflow: hidden; background: #1a1d22;
-  box-shadow: 0 3px 8px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.06); }
-.gc-tile.gpfocus { transform: translateY(-3px) scale(1.045); box-shadow: 0 0 0 2px #fff, 0 10px 20px rgba(0,0,0,.6); }
-.gc-tile-fallback { position: absolute; inset: 0; display: flex; align-items: flex-end; padding: 6px; font-size: 11px;
-  font-weight: 700; line-height: 1.15; color: #dcdedf; background: #23262e; }
-.gc-tile-badge { position: absolute; left: 4px; right: 4px; bottom: 4px; padding: 3px 5px; border-radius: 3px;
-  background: rgba(8,16,16,.88); color: ${VFD.lit}; font-size: 9px; font-weight: 700; letter-spacing: .12em;
-  text-transform: uppercase; text-align: center; }
-.gc-tile-caption { margin-top: 5px; font-size: 11px; color: #8b929a; font-variant-numeric: tabular-nums;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gc-swatch { position: relative; width: 30px; height: 30px; border-radius: 50%;
-  box-shadow: inset 0 2px 3px rgba(255,255,255,.25), inset 0 -3px 4px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.5); }
-.gc-swatch-on { box-shadow: inset 0 2px 3px rgba(255,255,255,.25), inset 0 -3px 4px rgba(0,0,0,.35), 0 0 0 2px #1a1d22, 0 0 0 4px #dcdedf; }
-.gc-swatch.gpfocus { box-shadow: 0 0 0 2px #1a1d22, 0 0 0 4px #fff, 0 0 12px rgba(255,255,255,.4); transform: scale(1.08); }
-.gc-swatch-name { position: absolute; top: 36px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #dcdedf;
-  white-space: nowrap; opacity: 0; pointer-events: none; }
-.gc-swatch.gpfocus .gc-swatch-name, .gc-swatch-on .gc-swatch-name { opacity: 1; }
-.gc-btn-row { display: flex; gap: 8px; }
-.gc-btn-row > .DialogButton { min-width: 0 !important; flex: 1; padding: 0 8px; }
+.gc-games { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.gc-tile { position: relative; aspect-ratio: 2 / 3; border-radius: 4px; overflow: hidden; background: rgba(0,0,0,.35);
+  box-shadow: 0 1px 3px rgba(0,0,0,.45); transition: transform .12s ease, box-shadow .12s ease; }
+.gc-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gc-tile.gpfocus { transform: scale(1.06); z-index: 1; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0,0,0,.55), 0 8px 16px rgba(0,0,0,.5); }
+.gc-tile-name { position: absolute; inset: 0; padding: 5px; display: flex; align-items: flex-end; font-size: 10px;
+  font-weight: 700; line-height: 1.15; color: #e8e9eb; background: #2a2d33; }
+.gc-tile-note { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 4px; background: rgba(0,0,0,.78); color: #fff;
+  font-size: 9px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+.gc-swatch { width: 28px; height: 28px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35), inset 0 2px 2px rgba(255,255,255,.2); }
+.gc-swatch-on { box-shadow: inset 0 0 0 1px rgba(0,0,0,.35), 0 0 0 2px #1b1d22, 0 0 0 4px #c7cbd1; }
+.gc-swatch.gpfocus { box-shadow: 0 0 0 2px #1b1d22, 0 0 0 4px #fff; transform: scale(1.1); }
+.gc-actions { display: flex; gap: 8px; margin-top: 10px; }
+.gc-actions > .DialogButton { flex: 1; min-width: 0 !important; height: 34px; padding: 0 8px; }
 `;
+
+export const progressTrack: CSSProperties = { height: 4, borderRadius: 2, background: "rgba(255,255,255,.12)", overflow: "hidden" };

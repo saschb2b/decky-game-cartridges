@@ -16,12 +16,15 @@ import {
   setSteamLibrary,
   State,
 } from "./api";
-import { CartArt, muted, sectionLabel, speedText, useCover } from "./components";
-import { CartridgeArt, ConsoleArt, KIT_CSS, Legend, Readout, Seg, SHELLS, shellOf, sizeParts, Swatches, VFD } from "./kit";
+import { CartCard, CartIcon, muted, sectionLabel, speedText } from "./components";
+import { CartridgeCard, gb, KIT_CSS, SHELLS, shellName, shellOf, Swatches } from "./kit";
 import { addSteamLibrary, coverFromImage, folderOn, moveSteamGame, overview, portraitURL, SteamFolder, steamFolders } from "./steam";
 import { errorText, fmtBytes, refresh, startedJob, useCartridgeState } from "./store";
 
 type ModalProps = { closeModal?: () => void };
+
+const AMBER = "#f0b357";
+const LEFT = 230;
 
 function fail(title: string, e: unknown) {
   toaster.toast({ title, body: errorText(e) });
@@ -44,15 +47,13 @@ async function pickCover(state: State | null): Promise<string | null> {
   return coverFromImage(url);
 }
 
-/** The two-column sheet every modal here uses: the object on the left, its controls on the right. */
+/** Every sheet here: the object on the left at a fixed width, its controls on the right. */
 function Sheet({ closeModal, left, children }: ModalProps & { left: ReactNode; children: ReactNode }) {
   return (
     <ModalRoot closeModal={closeModal}>
       <style>{KIT_CSS}</style>
-      <div style={{ display: "flex", gap: 28, alignItems: "flex-start", padding: "4px 2px" }}>
-        <div style={{ flex: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 14, paddingTop: 6 }}>
-          {left}
-        </div>
+      <div style={{ display: "flex", gap: 32, alignItems: "flex-start" }}>
+        <div style={{ width: LEFT, flex: "none" }}>{left}</div>
         <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
       </div>
     </ModalRoot>
@@ -61,31 +62,30 @@ function Sheet({ closeModal, left, children }: ModalProps & { left: ReactNode; c
 
 function Title({ children, sub }: { children: ReactNode; sub?: ReactNode }) {
   return (
-    <div style={{ marginBottom: 4 }}>
-      <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.015em", lineHeight: 1.1, color: "#fff" }}>{children}</div>
-      {sub && <div style={{ ...muted, fontSize: 13, marginTop: 6 }}>{sub}</div>}
+    <div>
+      <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.15, color: "#fff" }}>{children}</div>
+      {sub && <div style={{ ...muted, fontSize: 13, marginTop: 6, lineHeight: 1.4 }}>{sub}</div>}
     </div>
   );
 }
 
-const row: CSSProperties = { display: "flex", alignItems: "center", gap: 14, padding: "8px 0" };
-const rule: CSSProperties = { height: 1, background: "rgba(255,255,255,.07)" };
-const smallButton: CSSProperties = { minWidth: 0, width: "auto", padding: "0 18px", height: 34 };
+const row: CSSProperties = { display: "flex", alignItems: "center", gap: 12, padding: "10px 0" };
+const rule: CSSProperties = { height: 1, background: "rgba(255,255,255,.08)" };
+const button: CSSProperties = { minWidth: 0, width: "auto", padding: "0 18px", height: 34 };
+const panel: CSSProperties = { background: "rgba(255,255,255,.05)", borderRadius: 8, padding: "10px 12px" };
 
 // ---- eject ----------------------------------------------------------------------------------------------
 
 /** Eject with a confirmation; when programs still use the drive, names them and offers to close them. */
 export function doEject(cart: Cartridge, after?: () => void) {
-  const ejected = () => {
-    toaster.toast({ title: "Game Cartridges", body: `${cart.name} can be unplugged now` });
-    refresh();
-    after?.();
-  };
   const run = async (close: boolean) => {
     try {
       const result = await eject(cart.mount, close);
-      if (result.ok) ejected();
-      else askToClose(result.busy);
+      if (result.ok) {
+        toaster.toast({ title: "Game Cartridges", body: `${cart.name} can be unplugged now` });
+        refresh();
+        after?.();
+      } else askToClose(result.busy);
     } catch (e) {
       fail("Could not eject", e);
     }
@@ -98,14 +98,14 @@ export function doEject(cart: Cartridge, after?: () => void) {
         strTitle={`${cart.name} is still in use`}
         strDescription={
           <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-            <Readout style={{ margin: "4px 0 12px" }}>
-              <Legend color={VFD.amber}>Open files on the cartridge</Legend>
+            <div>These programs have files open on it:</div>
+            <div style={{ ...panel, margin: "8px 0 12px" }}>
               {names.map((n) => (
-                <div key={n} style={{ color: VFD.lit, fontSize: 14, fontWeight: 600, marginTop: 4 }}>
+                <div key={n} style={{ fontWeight: 700, color: "#fff" }}>
                   {n}
                 </div>
               ))}
-            </Readout>
+            </div>
             {stuck.length
               ? `${stuck.join(", ")} can't be closed from here. Quit it first, then eject again.`
               : "Close them and eject? A game that is still running loses unsaved progress."}
@@ -138,15 +138,14 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
   const source = copies.find((c) => c.mount === from) ?? active;
   if (!source) {
     return (
-      <Sheet closeModal={closeModal} left={<CartridgeArt name="" shell="#30343b" blank width={110} />}>
-        <Title sub="No plugged-in cartridge has this game any more.">Not here</Title>
+      <Sheet closeModal={closeModal} left={<div className="gc-tile" />}>
+        <Title sub="No plugged-in cartridge has this game any more.">Game not found</Title>
       </Sheet>
     );
   }
   const game = source.games.find((g) => g.id === gameId)!;
   const targets = state.cartridges.filter((c) => !copies.includes(c));
   const job = state.jobs.find((j) => j.game === gameId && (j.state === "queued" || j.state === "running"));
-  const [size, unit] = sizeParts(game.size);
   const art = portraitURL(game.appid);
   const start = async (target: Cartridge, move: boolean) => {
     try {
@@ -162,9 +161,9 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
         strTitle={`Remove ${game.title} from ${source.name}?`}
         strDescription={
           <>
-            Deletes its {fmtBytes(game.size)} of files from {source.home ? "this machine" : "the cartridge"}. Saves and
-            settings on this machine stay.
-            {copies.length === 1 && <div style={{ color: VFD.amber, marginTop: 8 }}>This is the only copy plugged in.</div>}
+            Deletes its {fmtBytes(game.size)} of files from {source.home ? "this machine" : "the cartridge"}. Saves and settings on this machine
+            stay.
+            {copies.length === 1 && <div style={{ color: AMBER, marginTop: 8 }}>This is the only copy plugged in.</div>}
           </>
         }
         strOKButtonText="Remove"
@@ -183,59 +182,51 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
     <Sheet
       closeModal={closeModal}
       left={
-        <>
-          <div className="gc-tile-art" style={{ width: 150 }}>
-            {art ? <img src={art} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div className="gc-tile-fallback">{game.title}</div>}
-          </div>
-          <Readout style={{ width: 150, boxSizing: "border-box", display: "flex", alignItems: "flex-end", gap: 5 }}>
-            <Seg text={size} height={20} />
-            <Legend style={{ marginBottom: 1 }}>{unit}</Legend>
-          </Readout>
-        </>
+        <div className="gc-tile" style={{ width: LEFT, boxShadow: "0 6px 18px rgba(0,0,0,.5)" }}>
+          {art ? <img src={art} /> : <div className="gc-tile-name">{game.title}</div>}
+        </div>
       }
     >
-      <Title>{game.title}</Title>
-      <div style={sectionLabel}>{copies.length > 1 ? "Copies" : "Lives on"}</div>
-      {copies.map((c) => (
-        <div key={c.mount} style={row}>
-          <CartArt cart={c} width={30} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>{c.name}</div>
-            <div style={muted}>
-              {c.home ? "Internal storage" : speedText(c.speed)}
-              {copies.length > 1 && c === active ? " · Steam starts this copy" : ""}
+      <Title sub={`${fmtBytes(game.size)} · ${copies.length > 1 ? `on ${copies.length} cartridges` : `on ${source.name}`}`}>{game.title}</Title>
+      {copies.length > 1 && (
+        <>
+          <div style={sectionLabel}>Copies</div>
+          {copies.map((c) => (
+            <div key={c.mount} style={row}>
+              <CartIcon cart={c} />
+              <div style={{ flex: 1, fontSize: 15, fontWeight: 700 }}>{c.name}</div>
+              <div style={muted}>{c === active ? "Steam starts this one" : ""}</div>
             </div>
-          </div>
-        </div>
-      ))}
+          ))}
+        </>
+      )}
       {job && (
-        <Readout style={{ marginTop: 8 }}>
-          <Legend>{job.title}</Legend>
-          <div style={{ color: VFD.lit, fontSize: 13, marginTop: 3 }}>{job.message}</div>
-        </Readout>
+        <div style={{ ...panel, marginTop: 14 }}>
+          <div style={{ fontWeight: 700 }}>{job.title}</div>
+          <div style={muted}>{job.message}</div>
+        </div>
       )}
       <div style={sectionLabel}>Copy or move to</div>
       {targets.length === 0 && <div style={muted}>Plug in another cartridge to copy or move this game.</div>}
       <Focusable flow-children="down">
         {targets.map((t, i) => {
           const fits = game.size === null || game.size + 512e6 < t.free;
-          const [free, freeUnit] = sizeParts(t.free);
           return (
             <div key={t.mount}>
               {i > 0 && <div style={rule} />}
               <div style={row}>
-                <CartArt cart={t} width={30} />
+                <CartIcon cart={t} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 700 }}>{t.name}</div>
-                  <div style={{ ...muted, color: fits ? muted.color : VFD.amber }}>
-                    {free} {freeUnit} free{fits ? "" : " · not enough space"}
+                  <div style={{ ...muted, color: fits ? muted.color : AMBER }}>
+                    {gb(t.free)} free{fits ? "" : " · not enough space"}
                   </div>
                 </div>
                 <Focusable style={{ display: "flex", gap: 8 }} flow-children="right">
-                  <DialogButton style={smallButton} disabled={!!job || !fits} onClick={() => start(t, false)}>
+                  <DialogButton style={button} disabled={!!job || !fits} onClick={() => start(t, false)}>
                     Copy
                   </DialogButton>
-                  <DialogButton style={smallButton} disabled={!!job || !fits} onClick={() => start(t, true)}>
+                  <DialogButton style={button} disabled={!!job || !fits} onClick={() => start(t, true)}>
                     Move
                   </DialogButton>
                 </Focusable>
@@ -244,8 +235,8 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
           );
         })}
       </Focusable>
-      <div style={{ ...rule, margin: "14px 0" }} />
-      <DialogButton style={{ ...smallButton, width: "100%" }} disabled={!!job} onClick={remove}>
+      <div style={{ ...rule, margin: "12px 0 16px" }} />
+      <DialogButton style={{ ...button, width: "100%" }} disabled={!!job} onClick={remove}>
         Remove from {source.name}…
       </DialogButton>
     </Sheet>
@@ -286,17 +277,8 @@ export function SteamGameModal({ closeModal, appid }: ModalProps & { appid: numb
     }
   };
   return (
-    <Sheet
-      closeModal={closeModal}
-      left={
-        <div className="gc-tile-art" style={{ width: 150 }}>
-          {art && <img src={art} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
-        </div>
-      }
-    >
-      <Title sub="Moves with Steam's own Move install folder, into a Steam library on the cartridge.">
-        {app?.display_name ?? "Steam game"}
-      </Title>
+    <Sheet closeModal={closeModal} left={<div className="gc-tile" style={{ width: LEFT }}>{art && <img src={art} />}</div>}>
+      <Title sub="Moves with Steam's own Move install folder, into a Steam library on the cartridge.">{app?.display_name ?? "Steam game"}</Title>
       <div style={sectionLabel}>Move to</div>
       {carts.length === 0 && <div style={muted}>No cartridge is plugged in.</div>}
       <Focusable flow-children="down">
@@ -307,18 +289,18 @@ export function SteamGameModal({ closeModal, appid }: ModalProps & { appid: numb
             <div key={cart.mount}>
               {i > 0 && <div style={rule} />}
               <div style={row}>
-                <CartArt cart={cart} width={30} />
+                <CartIcon cart={cart} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 700 }}>{cart.name}</div>
-                  <div style={muted}>{here ? "Installed here" : `${fmtBytes(cart.free)} free${folder ? "" : " · no Steam library yet"}`}</div>
+                  <div style={muted}>{here ? "Installed here" : `${gb(cart.free)} free${folder ? "" : " · no Steam library yet"}`}</div>
                 </div>
                 {folder ? (
-                  <DialogButton style={smallButton} disabled={here} onClick={() => move(folder)}>
+                  <DialogButton style={button} disabled={here} onClick={() => move(folder)}>
                     Move here
                   </DialogButton>
                 ) : (
-                  <DialogButton style={smallButton} onClick={() => addAndMove(cart)}>
-                    Add library & move
+                  <DialogButton style={button} onClick={() => addAndMove(cart)}>
+                    Add library and move
                   </DialogButton>
                 )}
               </div>
@@ -326,14 +308,14 @@ export function SteamGameModal({ closeModal, appid }: ModalProps & { appid: numb
           );
         })}
         {home && current && current.index !== home.index && (
-          <DialogButton style={{ ...smallButton, width: "100%", marginTop: 12 }} onClick={() => move(home)}>
+          <DialogButton style={{ ...button, width: "100%", marginTop: 12 }} onClick={() => move(home)}>
             Move back to this machine
           </DialogButton>
         )}
       </Focusable>
       <div style={{ ...muted, marginTop: 16, lineHeight: 1.45 }}>
-        On another machine, add the library once in Steam's storage settings. The game needs your account or Family
-        Sharing there. Proton saves of games without Steam Cloud travel with the cartridge.
+        On another machine, add the library once in Steam's storage settings. The game needs your account or Family Sharing there. Proton
+        saves of games without Steam Cloud travel with the cartridge.
       </div>
     </Sheet>
   );
@@ -344,7 +326,6 @@ export function SteamGameModal({ closeModal, appid }: ModalProps & { appid: numb
 export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: string }) {
   const state = useCartridgeState();
   const cart = state?.cartridges.find((c) => c.mount === mount);
-  const cover = useCover(cart);
   const [name, setName] = useState(cart?.name ?? "");
   const [busy, setBusy] = useState(false);
   const [folders, setFolders] = useState<SteamFolder[]>([]);
@@ -354,7 +335,6 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
   if (!state || !cart) return null;
   const folder = folderOn(folders, cart);
   const shell = shellOf(cart);
-  const [free, unit] = sizeParts(cart.free);
   const act = async (what: string, fn: () => Promise<unknown>) => {
     setBusy(true);
     try {
@@ -366,32 +346,12 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
       setBusy(false);
     }
   };
+  const facts = cart.home
+    ? [state.home_path]
+    : [cart.model, speedText(cart.speed)?.split(" · ")[0], `${cart.games.length} ${cart.games.length === 1 ? "game" : "games"}`].filter(Boolean);
   return (
-    <Sheet
-      closeModal={closeModal}
-      left={
-        <>
-          {cart.home ? <ConsoleArt width={190} /> : <CartridgeArt name={name || cart.name} shell={shell} art={cover} width={170} />}
-          <Readout style={{ width: cart.home ? 190 : 170, boxSizing: "border-box" }}>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 5 }}>
-              <Seg text={free} height={20} />
-              <Legend style={{ marginBottom: 1 }}>{unit} free</Legend>
-            </div>
-            <Legend style={{ display: "block", marginTop: 6 }}>
-              of {fmtBytes(cart.total)} · {cart.games.length} {cart.games.length === 1 ? "game" : "games"}
-            </Legend>
-            {!cart.home && cart.speed && (
-              <Legend color={cart.speed <= 480 ? VFD.amber : VFD.dim} style={{ display: "block", marginTop: 4 }}>
-                {speedText(cart.speed)}
-              </Legend>
-            )}
-          </Readout>
-        </>
-      }
-    >
-      <Title sub={cart.home ? state.home_path : [cart.model, cart.mount].filter(Boolean).join(" · ")}>
-        {cart.home ? `${cart.name} · internal` : cart.name}
-      </Title>
+    <Sheet closeModal={closeModal} left={<CartCard cart={cart} name={cart.home ? cart.name : name || cart.name} labelHeight={170} />}>
+      <Title sub={facts.join(" · ")}>{cart.home ? `${cart.name} (internal storage)` : cart.name}</Title>
       {!cart.home && (
         <>
           <div style={sectionLabel}>Label</div>
@@ -399,14 +359,14 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
             <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} />
             <Focusable style={{ display: "flex", gap: 8 }} flow-children="right">
               <DialogButton
-                style={smallButton}
+                style={button}
                 disabled={busy || !name.trim() || name.trim() === cart.name}
                 onClick={() => act("Could not rename", () => renameCartridge(cart.mount, name.trim()))}
               >
                 Save name
               </DialogButton>
               <DialogButton
-                style={smallButton}
+                style={button}
                 disabled={busy}
                 onClick={() =>
                   act("Could not set the label art", async () => {
@@ -415,25 +375,24 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
                   })
                 }
               >
-                {cart.cover ? "Change art…" : "Add art…"}
+                {cart.cover ? "Change label art…" : "Add label art…"}
               </DialogButton>
               {cart.cover && (
-                <DialogButton style={smallButton} disabled={busy} onClick={() => act("Could not remove the art", () => setCover(cart.mount, null))}>
+                <DialogButton style={button} disabled={busy} onClick={() => act("Could not remove the art", () => setCover(cart.mount, null))}>
                   Remove art
                 </DialogButton>
               )}
             </Focusable>
           </Focusable>
-          <div style={sectionLabel}>Shell</div>
+          <div style={sectionLabel}>Shell · {shellName(shell)}</div>
           <Swatches value={shell} onChange={(hex) => act("Could not change the shell", () => setColor(cart.mount, hex))} />
-          <div style={{ height: 14 }} />
         </>
       )}
       <div style={sectionLabel}>Drive</div>
       <Focusable style={{ display: "flex", gap: 8, flexWrap: "wrap" }} flow-children="right">
         {!cart.home && !folder && (
           <DialogButton
-            style={smallButton}
+            style={button}
             disabled={busy}
             onClick={() =>
               act("Could not add a Steam library", async () => {
@@ -447,7 +406,7 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
           </DialogButton>
         )}
         {!cart.home && (
-          <DialogButton style={smallButton} disabled={busy} onClick={() => doEject(cart, closeModal)}>
+          <DialogButton style={button} disabled={busy} onClick={() => doEject(cart, closeModal)}>
             Eject…
           </DialogButton>
         )}
@@ -468,35 +427,28 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
 function contents(drive: Drive) {
   if (!drive.partitions.length) return ["Empty, no partitions"];
   return drive.partitions.map((p) => {
-    const head = `${p.fstype ?? "no file system"}${p.label ? ` "${p.label}"` : ""} · ${fmtBytes(p.size)}`;
-    if (!p.mounts.length) return `${head} · not mounted`;
-    return `${head} · ${fmtBytes(p.used)} used${p.entries.length ? `: ${p.entries.join(", ")}` : ""}`;
+    const head = `${p.fstype ?? "no file system"}${p.label ? ` "${p.label}"` : ""}, ${fmtBytes(p.size)}`;
+    if (!p.mounts.length) return `${head}, not mounted`;
+    return `${head}, ${fmtBytes(p.used)} used${p.entries.length ? `: ${p.entries.join(", ")}` : ""}`;
   });
 }
 
 function DriveIdentity({ drive }: { drive: Drive }) {
-  const [size, unit] = sizeParts(drive.size);
   return (
-    <Readout>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
-        <Seg text={size} height={22} />
-        <Legend style={{ marginBottom: 2 }}>{unit}</Legend>
-        <div style={{ flex: 1 }} />
-        <Legend color={drive.speed !== null && drive.speed <= 480 ? VFD.amber : VFD.dim} style={{ marginBottom: 2 }}>
-          {speedText(drive.speed) ?? ""}
-        </Legend>
+    <div style={panel}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ fontWeight: 700, color: "#fff" }}>{drive.model}</div>
+        <div style={{ fontWeight: 700, color: "#fff", fontVariantNumeric: "tabular-nums" }}>{gb(drive.size)}</div>
       </div>
-      <div style={{ color: VFD.lit, fontSize: 14, fontWeight: 600, marginTop: 8 }}>{drive.model}</div>
-      <Legend style={{ display: "block", marginTop: 2 }}>
-        {drive.dev}
-        {drive.serial ? ` · serial ${drive.serial}` : ""}
-      </Legend>
+      <div style={{ ...muted, marginTop: 2 }}>
+        {[drive.dev, drive.serial && `serial ${drive.serial}`, speedText(drive.speed)].filter(Boolean).join(" · ")}
+      </div>
       {contents(drive).map((line) => (
-        <Legend key={line} style={{ display: "block", marginTop: 6, letterSpacing: "0.06em", textTransform: "none", fontSize: 11 }}>
+        <div key={line} style={{ ...muted, marginTop: 6, color: "#c6c9cd" }}>
           {line}
-        </Legend>
+        </div>
       ))}
-    </Readout>
+    </div>
   );
 }
 
@@ -539,26 +491,24 @@ export function FormatModal({ closeModal, drive }: ModalProps & { drive: Drive }
     <Sheet
       closeModal={closeModal}
       left={
-        <>
-          <CartridgeArt
-            name={label || "Untitled"}
-            shell={shell}
-            art={cover ? `data:image/jpeg;base64,${cover}` : null}
-            width={170}
-          />
-          <Legend color="#8b929a">Preview</Legend>
-        </>
+        <CartridgeCard
+          name={label}
+          shell={shell}
+          art={cover ? `data:image/jpeg;base64,${cover}` : null}
+          tag={speedText(drive.speed)?.split(" · ")[0]}
+          free={drive.size}
+          total={drive.size}
+          labelHeight={170}
+        />
       }
     >
-      <Title sub="Name it, give it label art and a shell. The drive is erased and becomes an empty cartridge.">
-        New cartridge
-      </Title>
+      <Title sub="The drive is erased and becomes an empty cartridge with this label.">New cartridge</Title>
       <div style={sectionLabel}>Label</div>
       <Focusable flow-children="down" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <TextField label="Name" description="Shown in Steam and as the drive's label" value={name} onChange={(e) => setName(e.target.value)} />
         <Focusable style={{ display: "flex", gap: 8 }} flow-children="right">
           <DialogButton
-            style={smallButton}
+            style={button}
             disabled={busy}
             onClick={async () => {
               try {
@@ -569,18 +519,18 @@ export function FormatModal({ closeModal, drive }: ModalProps & { drive: Drive }
               }
             }}
           >
-            {cover ? "Change art…" : "Choose art…"}
+            {cover ? "Change label art…" : "Choose label art…"}
           </DialogButton>
           {cover && (
-            <DialogButton style={smallButton} onClick={() => setCoverJpeg(null)}>
+            <DialogButton style={button} onClick={() => setCoverJpeg(null)}>
               No art
             </DialogButton>
           )}
         </Focusable>
       </Focusable>
-      <div style={sectionLabel}>Shell</div>
+      <div style={sectionLabel}>Shell · {shellName(shell)}</div>
       <Swatches value={shell} onChange={setShell} />
-      <div style={{ ...sectionLabel, marginTop: 26 }}>Drive</div>
+      <div style={sectionLabel}>Drive</div>
       <DriveIdentity drive={drive} />
       <DialogButton style={{ marginTop: 16 }} disabled={busy || !label} onClick={confirm}>
         Erase drive and make cartridge…
@@ -588,3 +538,4 @@ export function FormatModal({ closeModal, drive }: ModalProps & { drive: Drive }
     </Sheet>
   );
 }
+

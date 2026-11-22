@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Cartridge, getCover } from "./api";
-import { CartridgeArt, ConsoleArt, shellOf } from "./kit";
+import { ReactNode } from "react";
+import { CartGlyph, CartridgeCard, shellOf } from "./kit";
 
 const coverCache = new Map<string, string | null>();
 
@@ -29,11 +30,28 @@ export function useCover(cart: Cartridge | null | undefined) {
   return url;
 }
 
-/** A cartridge drawn as one; the machine's internal storage as a console base. */
-export function CartArt({ cart, width }: { cart: Cartridge; width: number }) {
+/** A cartridge (or this machine) as its card: label with the cover art, free space, and children. */
+export function CartCard({ cart, children, width, labelHeight, name }: { cart: Cartridge; children?: ReactNode; width?: number | string; labelHeight?: number; name?: string }) {
   const cover = useCover(cart);
-  if (cart.home) return <ConsoleArt width={width * 1.15} />;
-  return <CartridgeArt name={cart.name} shell={shellOf(cart)} art={cover} width={width} />;
+  return (
+    <CartridgeCard
+      name={name ?? cart.name}
+      shell={shellOf(cart)}
+      art={cover}
+      kind={cart.home ? "home" : "cartridge"}
+      tag={cart.home ? "INTERNAL" : speedText(cart.speed)?.split(" · ")[0]}
+      free={cart.free}
+      total={cart.total}
+      width={width}
+      labelHeight={labelHeight}
+    >
+      {children}
+    </CartridgeCard>
+  );
+}
+
+export function CartIcon({ cart, size }: { cart: Cartridge; size?: number }) {
+  return <CartGlyph shell={shellOf(cart)} home={cart.home} size={size} />;
 }
 
 export function speedText(speed: number | null) {
