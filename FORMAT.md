@@ -146,12 +146,20 @@ never closed. Then it unmounts and powers the drive off.
 
 ## Steam games
 
-A cartridge can carry a Steam library: `SteamLibrary/` at its root, added in Steam
-(`SteamClient.InstallFolder.AddInstallFolder`) and labelled with the cartridge name. Steam games move
-there with Steam's own "Move install folder" (`MoveInstallFolderForApp`); the plugin offers this for
-installed Steam games. Worth it for big Steam games you play on your own machines: Steam does the
-copying, updates and verification. Limits: on another machine the library has to be added once in
-Steam's storage settings, and the game needs that account (or Family Sharing); unplugged, the games
-show as not installed rather than hidden; and Proton prefixes (`steamapps/compatdata`) live in the
-library, so saves of Proton games without Steam Cloud travel with the cartridge (the one exception to
-"saves stay home").
+Steam's own games live on a cartridge in a Steam library folder, `SteamLibrary/` at its root. Steam
+manages them as usual (updates, file checks, launching), and the cartridge needs no entry for them in
+`cartridge.json`: the games are the `steamapps/appmanifest_<appid>.acf` files in that folder.
+
+- The agent (version 3) adds `SteamLibrary/` to Steam (`SteamClient.InstallFolder.AddInstallFolder`,
+  labelled with the cartridge name) when the cartridge is plugged in, and removes it again
+  (`RemoveInstallFolder`) once Steam sees it unmounted. While the cartridge is in, its Steam games show
+  as installed; without it, Steam shows them as not installed. Play time and settings belong to the
+  account and stay.
+- Readers list these games together with the cartridge's own games. The plugin moves them with Steam's
+  "Move install folder" (`MoveInstallFolderForApp`) and removes them with Steam's uninstall. It creates
+  `SteamLibrary/` the first time a Steam game moves to a cartridge.
+- Steam games move but are not copied: Steam keeps one install per game on a machine, and a second
+  copy on a cartridge would clash with the first when that cartridge is plugged into the same machine.
+- On another machine a game needs the account that owns it, or Family Sharing.
+- Proton keeps a game's prefix in its library (`steamapps/compatdata`). Saves of Windows games without
+  Steam Cloud therefore travel with the cartridge, the one exception to "saves stay on the machine".

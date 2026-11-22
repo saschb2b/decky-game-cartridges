@@ -1,6 +1,6 @@
 import { FileSelectionType, openFilePicker, toaster } from "@decky/api";
 import { ConfirmModal, DialogButton, Focusable, ModalRoot, showModal, TextField } from "@decky/ui";
-import { CSSProperties, ReactNode, useEffect, useState } from "react";
+import { CSSProperties, ReactNode, useState } from "react";
 import {
   Cartridge,
   copyGame,
@@ -17,8 +17,8 @@ import {
   State,
 } from "./api";
 import { CartCard, CartIcon, muted, sectionLabel, speedText } from "./components";
-import { CartridgeCard, gb, KIT_CSS, SHELLS, shellName, shellOf, Swatches } from "./kit";
-import { addSteamLibrary, coverFromImage, folderOn, moveSteamGame, overview, portraitURL, SteamFolder, steamFolders } from "./steam";
+import { CartridgeCard, gb, GameTile, KIT_CSS, SHELLS, shellName, shellOf, Swatches } from "./kit";
+import { coverFromImage, isListed, listedGames, moveSteamGame, portraitURL, uninstallSteamGame, useSteamMove } from "./steam";
 import { errorText, fmtBytes, refresh, startedJob, useCartridgeState } from "./store";
 
 type ModalProps = { closeModal?: () => void };
@@ -128,10 +128,13 @@ export function doEject(cart: Cartridge, after?: () => void) {
   );
 }
 
-// ---- a game on cartridges: copy, move, remove ------------------------------------------------------------
+// ---- a game: copy, move, remove ---------------------------------------------------------------------------
 
+/** Cartridge games copy, move and remove with the plugin. Steam games move with Steam's own "Move install
+ * folder" and uninstall with Steam; Steam keeps one install per game on a machine, so they don't copy. */
 export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: string; from?: string }) {
   const state = useCartridgeState();
+  const steamMove = useSteamMove();
   if (!state) return null;
   const copies = state.cartridges.filter((c) => c.games.some((g) => g.id === gameId));
   const active = copies.find((c) => c.games.find((g) => g.id === gameId)?.active) ?? copies[0];
@@ -139,23 +142,36 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
   if (!source) {
     return (
       <Sheet closeModal={closeModal} left={<div className="gc-tile" />}>
-        <Title sub="No plugged-in cartridge has this game any more.">Game not found</Title>
+        <Title sub="It is not on this machine or a plugged-in cartridge any more.">Game not found</Title>
       </Sheet>
     );
   }
   const game = source.games.find((g) => g.id === gameId)!;
-  const targets = state.cartridges.filter((c) => !copies.includes(c));
-  const job = state.jobs.find((j) => j.game === gameId && (j.state === "queued" || j.state === "running"));
+  const steam = game.kind === "steam";
+  const targets = state.cartridges.filter((c) => !copies.includes(c) && (c.home || c.exists));
+  const job =
+    state.jobs.find((j) => j.game === gameId && (j.state === "queued" || j.state === "running")) ??
+    (steamMove?.state === "running" ? steamMove : undefined);
   const art = portraitURL(game.appid);
   const start = async (target: Cartridge, move: boolean) => {
     try {
-      startedJob(await copyGame(source.mount, gameId, target.mount, move));
-      closeModal?.();
+      if (steam) {
+        closeModal?.();
+        await moveSteamGame(game, source, target, state);
+      } else {
+        startedJob(await copyGame(source.mount, gameId, target.mount, move));
+        closeModal?.();
+      }
     } catch (e) {
       fail(`Could not ${move ? "move" : "copy"} ${game.title}`, e);
     }
   };
-  const remove = () =>
+  const remove = () => {
+    if (steam) {
+      closeModal?.();
+      uninstallSteamGame(game.appid!);
+      return;
+    }
     showModal(
       <ConfirmModal
         strTitle={`Remove ${game.title} from ${source.name}?`}
@@ -178,6 +194,8 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
         }}
       />,
     );
+  };
+  const where = copies.length > 1 ? `on ${copies.length} drives` : `on ${source.name}`;
   return (
     <Sheet
       closeModal={closeModal}
@@ -187,7 +205,7 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
         </div>
       }
     >
-      <Title sub={`${fmtBytes(game.size)} · ${copies.length > 1 ? `on ${copies.length} cartridges` : `on ${source.name}`}`}>{game.title}</Title>
+      <Title sub={`${fmtBytes(game.size)} · ${steam ? "Steam game " : ""}${where}`}>{game.title}</Title>
       {copies.length > 1 && (
         <>
           <div style={sectionLabel}>Copies</div>
@@ -195,7 +213,7 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
             <div key={c.mount} style={row}>
               <CartIcon cart={c} />
               <div style={{ flex: 1, fontSize: 15, fontWeight: 700 }}>{c.name}</div>
-              <div style={muted}>{c === active ? "Steam starts this one" : ""}</div>
+              <div style={muted}>{c === active && !steam ? "Steam starts this one" : ""}</div>
             </div>
           ))}
         </>
@@ -206,8 +224,8 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
           <div style={muted}>{job.message}</div>
         </div>
       )}
-      <div style={sectionLabel}>Copy or move to</div>
-      {targets.length === 0 && <div style={muted}>Plug in another cartridge to copy or move this game.</div>}
+      <div style={sectionLabel}>{steam ? "Move to" : "Copy or move to"}</div>
+      {targets.length === 0 && <div style={muted}>Plug in a cartridge to {steam ? "move" : "copy or move"} this game.</div>}
       <Focusable flow-children="down">
         {targets.map((t, i) => {
           const fits = game.size === null || game.size + 512e6 < t.free;
@@ -223,9 +241,11 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
                   </div>
                 </div>
                 <Focusable style={{ display: "flex", gap: 8 }} flow-children="right">
-                  <DialogButton style={button} disabled={!!job || !fits} onClick={() => start(t, false)}>
-                    Copy
-                  </DialogButton>
+                  {!steam && (
+                    <DialogButton style={button} disabled={!!job || !fits} onClick={() => start(t, false)}>
+                      Copy
+                    </DialogButton>
+                  )}
                   <DialogButton style={button} disabled={!!job || !fits} onClick={() => start(t, true)}>
                     Move
                   </DialogButton>
@@ -235,89 +255,39 @@ export function GameModal({ closeModal, gameId, from }: ModalProps & { gameId: s
           );
         })}
       </Focusable>
+      {steam && targets.length > 0 && (
+        <div style={{ ...muted, marginTop: 6, lineHeight: 1.45 }}>Steam keeps one copy of each game on a machine, so Steam games move.</div>
+      )}
       <div style={{ ...rule, margin: "12px 0 16px" }} />
       <DialogButton style={{ ...button, width: "100%" }} disabled={!!job} onClick={remove}>
-        Remove from {source.name}…
+        {steam ? `Uninstall from ${source.name}…` : `Remove from ${source.name}…`}
       </DialogButton>
     </Sheet>
   );
 }
 
-// ---- a Steam game: Steam's own move into a library folder on a cartridge --------------------------------
+// ---- every game on a drive --------------------------------------------------------------------------------
 
-export function SteamGameModal({ closeModal, appid }: ModalProps & { appid: number }) {
+export function AllGamesModal({ closeModal, mount }: ModalProps & { mount: string }) {
   const state = useCartridgeState();
-  const [folders, setFolders] = useState<SteamFolder[] | null>(null);
-  useEffect(() => {
-    steamFolders().then(setFolders);
-  }, []);
-  const app = overview(appid);
-  if (!state || !folders) return null;
-  const current = folders.find((f) => f.apps.includes(appid));
-  const home = folders.find((f) => f.index === 0);
-  const carts = state.cartridges.filter((c) => !c.home && c.exists);
-  const art = portraitURL(appid);
-  const move = async (folder: SteamFolder) => {
-    try {
-      await moveSteamGame(appid, folder.index);
-      toaster.toast({ title: "Game Cartridges", body: `Steam is moving ${app?.display_name}` });
-      closeModal?.();
-    } catch (e) {
-      fail("Steam could not move it", e);
-    }
-  };
-  const addAndMove = async (cart: Cartridge) => {
-    try {
-      const path = await setSteamLibrary(cart.mount);
-      const folder = await addSteamLibrary(path, cart.name);
-      refresh();
-      if (folder) await move(folder);
-    } catch (e) {
-      fail("Could not add a Steam library", e);
-    }
-  };
+  const cart = state?.cartridges.find((c) => c.mount === mount);
+  if (!cart) return null;
+  const games = listedGames(cart);
   return (
-    <Sheet closeModal={closeModal} left={<div className="gc-tile" style={{ width: LEFT }}>{art && <img src={art} />}</div>}>
-      <Title sub="Moves with Steam's own Move install folder, into a Steam library on the cartridge.">{app?.display_name ?? "Steam game"}</Title>
-      <div style={sectionLabel}>Move to</div>
-      {carts.length === 0 && <div style={muted}>No cartridge is plugged in.</div>}
-      <Focusable flow-children="down">
-        {carts.map((cart, i) => {
-          const folder = folderOn(folders, cart);
-          const here = !!folder && current?.index === folder.index;
-          return (
-            <div key={cart.mount}>
-              {i > 0 && <div style={rule} />}
-              <div style={row}>
-                <CartIcon cart={cart} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700 }}>{cart.name}</div>
-                  <div style={muted}>{here ? "Installed here" : `${gb(cart.free)} free${folder ? "" : " · no Steam library yet"}`}</div>
-                </div>
-                {folder ? (
-                  <DialogButton style={button} disabled={here} onClick={() => move(folder)}>
-                    Move here
-                  </DialogButton>
-                ) : (
-                  <DialogButton style={button} onClick={() => addAndMove(cart)}>
-                    Add library and move
-                  </DialogButton>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {home && current && current.index !== home.index && (
-          <DialogButton style={{ ...button, width: "100%", marginTop: 12 }} onClick={() => move(home)}>
-            Move back to this machine
-          </DialogButton>
-        )}
+    <ModalRoot closeModal={closeModal}>
+      <style>{KIT_CSS + ".gc-all { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; }"}</style>
+      <Title sub={`${games.length} games · ${gb(cart.free)} free`}>{cart.name}</Title>
+      <Focusable className="gc-all" style={{ marginTop: 16 }}>
+        {games.map((game) => (
+          <GameTile
+            key={game.id}
+            art={portraitURL(game.appid)}
+            title={game.title}
+            onActivate={() => showModal(<GameModal gameId={game.id} from={cart.mount} />)}
+          />
+        ))}
       </Focusable>
-      <div style={{ ...muted, marginTop: 16, lineHeight: 1.45 }}>
-        On another machine, add the library once in Steam's storage settings. The game needs your account or Family Sharing there. Proton
-        saves of games without Steam Cloud travel with the cartridge.
-      </div>
-    </Sheet>
+    </ModalRoot>
   );
 }
 
@@ -328,12 +298,8 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
   const cart = state?.cartridges.find((c) => c.mount === mount);
   const [name, setName] = useState(cart?.name ?? "");
   const [busy, setBusy] = useState(false);
-  const [folders, setFolders] = useState<SteamFolder[]>([]);
-  useEffect(() => {
-    steamFolders().then(setFolders);
-  }, []);
   if (!state || !cart) return null;
-  const folder = folderOn(folders, cart);
+  const steamGames = cart.games.filter((g) => g.kind === "steam" && isListed(g)).length;
   const shell = shellOf(cart);
   const act = async (what: string, fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -390,18 +356,8 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
       )}
       <div style={sectionLabel}>Drive</div>
       <Focusable style={{ display: "flex", gap: 8, flexWrap: "wrap" }} flow-children="right">
-        {!cart.home && !folder && (
-          <DialogButton
-            style={button}
-            disabled={busy}
-            onClick={() =>
-              act("Could not add a Steam library", async () => {
-                const path = await setSteamLibrary(cart.mount);
-                await addSteamLibrary(path, cart.name);
-                setFolders(await steamFolders());
-              })
-            }
-          >
+        {!cart.home && !cart.steam_library && (
+          <DialogButton style={button} disabled={busy} onClick={() => act("Could not add a Steam library", () => setSteamLibrary(cart.mount))}>
             Add Steam library
           </DialogButton>
         )}
@@ -413,10 +369,10 @@ export function CartridgeModal({ closeModal, mount }: ModalProps & { mount: stri
       </Focusable>
       <div style={{ ...muted, marginTop: 10, lineHeight: 1.45 }}>
         {cart.home
-          ? "Games here play without a cartridge plugged in. Move them back onto a cartridge to take them along."
-          : folder
-            ? `Steam library on this cartridge: ${folder.apps.length} Steam ${folder.apps.length === 1 ? "game" : "games"}.`
-            : "A Steam library on the cartridge lets Steam move its own games onto it."}
+          ? "Games here play without a cartridge plugged in. Move them onto a cartridge to take them along."
+          : cart.steam_library
+            ? `Steam library on this cartridge: ${steamGames} Steam ${steamGames === 1 ? "game" : "games"}. Steam shows them while it is plugged in.`
+            : "Steam games get a Steam library on the cartridge when the first one moves here. Add it now to install Steam games straight onto it."}
       </div>
     </Sheet>
   );

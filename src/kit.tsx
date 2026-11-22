@@ -295,6 +295,16 @@ export function GameTile({ art, title, onActivate, note }: { art: string | null;
   );
 }
 
+/** The last tile of a long list: how many more games there are; opens the full list. */
+export function MoreTile({ count, onActivate }: { count: number; onActivate: () => void }) {
+  return (
+    <Focusable className="gc-tile gc-tile-more" onActivate={onActivate} onClick={onActivate}>
+      <div>+{count}</div>
+      <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.75 }}>more</div>
+    </Focusable>
+  );
+}
+
 export function Swatches({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
   return (
     <Focusable style={{ display: "flex", gap: 10, flexWrap: "wrap" }} flow-children="right">
@@ -325,6 +335,8 @@ export const KIT_CSS = `
   font-weight: 700; line-height: 1.15; color: #e8e9eb; background: #2a2d33; }
 .gc-tile-note { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 4px; background: rgba(0,0,0,.78); color: #fff;
   font-size: 9px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+.gc-tile-more { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: rgba(255,255,255,.08); color: #e8e9eb; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .gc-swatch { width: 28px; height: 28px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35), inset 0 2px 2px rgba(255,255,255,.2); }
 .gc-swatch-on { box-shadow: inset 0 0 0 1px rgba(0,0,0,.35), 0 0 0 2px #1b1d22, 0 0 0 4px #c7cbd1; }
 .gc-swatch.gpfocus { box-shadow: 0 0 0 2px #1b1d22, 0 0 0 4px #fff; transform: scale(1.1); }

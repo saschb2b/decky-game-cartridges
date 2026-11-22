@@ -4,9 +4,9 @@ import { ReactNode, useState } from "react";
 import { FaExclamationTriangle } from "react-icons/fa";
 import { cancelJob, Cartridge, Drive, installAgent, Job, State } from "./api";
 import { CartCard, muted } from "./components";
-import { BLANK_SHELL, CartridgeCard, gb, GameTile, inkFor, KIT_CSS, progressTrack, shellOf } from "./kit";
-import { CartridgeModal, FormatModal, GameModal, doEject } from "./modals";
-import { portraitURL } from "./steam";
+import { BLANK_SHELL, CartridgeCard, gb, GameTile, inkFor, KIT_CSS, MoreTile, progressTrack, shellOf } from "./kit";
+import { AllGamesModal, CartridgeModal, FormatModal, GameModal, doEject } from "./modals";
+import { cancelSteamMove, listedGames, portraitURL, useSteamMove } from "./steam";
 import { errorText, fmtBytes, refresh, useCartridgeState } from "./store";
 
 const AMBER = "#f0b357";
@@ -79,17 +79,20 @@ function Transfer({ job, art }: { job: Job; art: string | null }) {
   const running = job.state === "running" || job.state === "queued";
   const failed = job.state === "failed";
   const [doing, did] = VERBS[job.kind];
-  const copying = running && job.total > 0 && job.message === "Copying files";
-  const pct = job.state === "done" ? 100 : copying ? Math.min(99, Math.floor((job.done / job.total) * 100)) : null;
+  const steam = job.id === "steam-move";
+  const copying = running && (steam ? job.message === "Moving files" : job.total > 0 && job.message === "Copying files");
+  const pct =
+    job.state === "done" ? 100 : copying ? Math.min(99, job.percent ?? Math.floor((job.done / Math.max(1, job.total)) * 100)) : null;
   const route = job.kind === "remove" ? `from ${job.src_name}` : job.kind === "format" ? job.src_name : `${job.src_name} → ${job.dst_name}`;
   let status: string;
   if (failed) status = job.error ?? "Failed";
   else if (job.state === "done") status = job.message;
   else if (job.state === "queued") status = "Waiting for the job before it";
-  else if (copying) {
+  else if (copying && job.total > 0) {
     status = `${fmtBytes(job.done)} of ${fmtBytes(job.total)}`;
     if (job.rate) status += ` · ${fmtBytes(job.rate)}/s · ${timeLeft((job.total - job.done) / job.rate)}`;
-  } else status = `${job.message}…`;
+  } else if (copying) status = "Steam is moving the files…";
+  else status = `${job.message}…`;
   return (
     <PanelSectionRow>
       <div style={{ background: "rgba(255,255,255,.05)", borderRadius: 8, padding: 10 }}>
@@ -124,7 +127,7 @@ function Transfer({ job, art }: { job: Job; art: string | null }) {
           {status}
         </div>
         {running && job.kind !== "format" && (
-          <DialogButton style={{ marginTop: 10, height: 32, padding: 0 }} onClick={() => cancelJob(job.id).then(refresh)}>
+          <DialogButton style={{ marginTop: 10, height: 32, padding: 0 }} onClick={() => (steam ? cancelSteamMove() : cancelJob(job.id).then(refresh))}>
             Cancel
           </DialogButton>
         )}
@@ -135,28 +138,41 @@ function Transfer({ job, art }: { job: Job; art: string | null }) {
 
 // ---- a cartridge ----------------------------------------------------------------------------------------
 
+const TILES = 8;
+
 function CartridgeBlock({ cart, jobs }: { cart: Cartridge; jobs: Job[] }) {
   const ink = inkFor(shellOf(cart));
   const slow = !!cart.speed && cart.speed <= 480;
+  const games = listedGames(cart);
+  const shown = games.length > TILES ? games.slice(0, TILES - 1) : games;
   return (
     <PanelSection>
       <PanelSectionRow>
         <CartCard cart={cart}>
-          {cart.games.length ? (
+          {games.length ? (
             <Focusable className="gc-games">
-              {cart.games.map((game) => {
+              {shown.map((game) => {
                 const job = jobs.find((j) => j.game === game.id && (j.state === "running" || j.state === "queued"));
-                const pct = job && job.total ? `${Math.floor((job.done / job.total) * 100)}%` : job ? "…" : undefined;
+                const pct = !job
+                  ? undefined
+                  : job.percent !== undefined
+                    ? `${job.percent}%`
+                    : job.total
+                      ? `${Math.floor((job.done / job.total) * 100)}%`
+                      : "…";
                 return (
                   <GameTile
                     key={game.id}
                     art={portraitURL(game.appid)}
                     title={game.title}
-                    note={pct ?? (!game.present ? "Missing" : undefined)}
+                    note={pct ?? (!game.present ? (game.kind === "steam" ? "Not installed" : "Missing") : undefined)}
                     onActivate={() => showModal(<GameModal gameId={game.id} from={cart.mount} />)}
                   />
                 );
               })}
+              {shown.length < games.length && (
+                <MoreTile count={games.length - shown.length} onActivate={() => showModal(<AllGamesModal mount={cart.mount} />)} />
+              )}
             </Focusable>
           ) : (
             <div style={{ fontSize: 12, color: ink.muted, lineHeight: 1.4 }}>
@@ -196,6 +212,7 @@ function BlankBlock({ drive }: { drive: Drive }) {
 export function QuickPanel() {
   const visible = useQuickAccessVisible();
   const state = useCartridgeState(visible ? 4000 : 0);
+  const steamMove = useSteamMove();
   if (!state) {
     return (
       <PanelSection>
@@ -208,7 +225,8 @@ export function QuickPanel() {
   const usb = state.cartridges.filter((c) => !c.home);
   const home = state.cartridges.find((c) => c.home);
   // Running jobs, plus finished ones for a little while (failures longer, so the reason can be read).
-  const jobs = state.jobs.filter((j) => j.age === null || (j.state === "failed" ? j.age < 600 : j.state !== "cancelled" && j.age < 20));
+  const all = steamMove ? [...state.jobs, steamMove] : state.jobs;
+  const jobs = all.filter((j) => j.age === null || (j.state === "failed" ? j.age < 600 : j.state !== "cancelled" && j.age < 20));
   const artFor = (job: Job) => {
     const game = state.cartridges.flatMap((c) => c.games).find((g) => g.id === job.game);
     return game ? portraitURL(game.appid) : null;
@@ -225,7 +243,7 @@ export function QuickPanel() {
         </PanelSection>
       )}
       {usb.map((cart) => (
-        <CartridgeBlock key={cart.mount} cart={cart} jobs={state.jobs} />
+        <CartridgeBlock key={cart.mount} cart={cart} jobs={all} />
       ))}
       {state.drives.map((drive) => (
         <BlankBlock key={drive.dev} drive={drive} />
@@ -237,7 +255,7 @@ export function QuickPanel() {
           </PanelSectionRow>
         </PanelSection>
       )}
-      {home && <CartridgeBlock cart={home} jobs={state.jobs} />}
+      {home && <CartridgeBlock cart={home} jobs={all} />}
     </>
   );
 }

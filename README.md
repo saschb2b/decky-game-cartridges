@@ -10,7 +10,8 @@ cartridge can go from your PC to your Steam Deck to a friend's machine.
 ## What it does
 
 Every plugged-in cartridge shows up in the Quick Access menu with its label, free space and games.
-The machine's internal storage appears the same way, as **This PC** (or **This Deck**).
+The machine's internal storage appears the same way, as **This PC** (or **This Deck**), with the
+Steam games installed on it.
 
 <p>
   <img src="docs/screenshots/panel.jpg" width="49%" alt="The plugin in the Quick Access menu: the Zelda cartridge with six games, and This PC">
@@ -20,7 +21,8 @@ The machine's internal storage appears the same way, as **This PC** (or **This D
 Select a game to copy or move it to another cartridge or to This PC, or to remove it. A copy shows
 its speed and the time left, and **Cancel** deletes the partial files. A game that moves keeps its
 Steam entry, play time and controller layout. The same options are in the game's menu in the Steam
-library, under **Game cartridge…**.
+library, under **Game cartridge…**. Steam games are moved by Steam itself and can't be copied, since
+Steam keeps one install of a game per machine.
 
 <p>
   <img src="docs/screenshots/game.jpg" width="49%" alt="A game's sheet with Copy, Move and Remove">
@@ -67,21 +69,20 @@ Play runs the cartridge's `launch.sh`.
 
 ## Which games can go on a cartridge
 
-Any game that can start from its own folder. On a cartridge, a game is a folder `games/<id>/` with a
-`launch.sh` that finds its own location, so it works at any mount path, and that keeps saves and
-settings in `~/.local/share/game-cartridges/<id>/` on the machine. PC ports and recompilations,
-emulators with their games, and DRM-free Linux games all fit. Windows games that need Proton need
-their own launcher for now, since the shared helpers have nothing for Proton yet.
+Steam games go on a cartridge as they are. Moving one there puts it in a Steam library on the
+cartridge, using Steam's own "Move install folder", so Steam keeps handling updates. Whenever the
+cartridge is plugged in, the cartridge service adds that library to Steam, and the games show as
+installed. When it is unplugged, the library is removed again and they show as not installed. On
+another machine a game still needs your account or Family Sharing. Windows games keep their Proton
+data in the library, so their saves travel with the cartridge unless the game uses Steam Cloud.
 
-The plugin copies, moves and removes games, but it cannot turn an existing game into a cartridge
-game yet. That step is done by hand. [FORMAT.md](FORMAT.md) describes the layout, and
-[examples/zelda](examples/zelda) has the launchers of a real cartridge.
-
-Steam games work differently. A cartridge can hold a Steam library, and **Game cartridge…** moves an
-installed Steam game there with Steam's own "Move install folder", so Steam keeps handling updates.
-On another machine the game still needs your account or Family Sharing, and the library has to be
-added once in Steam's storage settings. While the cartridge is unplugged, these games show as not
-installed instead of disappearing. This part has had the least testing.
+Games from outside Steam need a folder `games/<id>/` with a `launch.sh` that finds its own location,
+so it works at any mount path, and that keeps saves and settings in
+`~/.local/share/game-cartridges/<id>/` on the machine. PC ports and recompilations, emulators with
+their games, and DRM-free Linux games all fit. Windows games from outside Steam need their own
+launcher for now, since the shared helpers have nothing for Proton yet. The plugin copies, moves and
+removes these games, but setting one up the first time is done by hand. [FORMAT.md](FORMAT.md)
+describes the layout, and [examples/zelda](examples/zelda) has the launchers of a real cartridge.
 
 ## Status
 

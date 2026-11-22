@@ -10,6 +10,9 @@ First public version.
 - Copy, move and remove games between cartridges and This PC, with speed, time left and Cancel.
 - Manage a cartridge: rename it, set label art and shell colour, add a Steam library, eject it.
   Eject lists programs that still use the drive.
+- Steam games are listed with the other games, on cartridges and on This PC. They move with Steam's
+  own "Move install folder", and the cartridge service adds a cartridge's Steam library to Steam while
+  it is plugged in.
 - Each cartridge gets a Steam collection with its name.
 - **Game cartridge…** in a game's menu in the Steam library.
 - The cartridge service adds a cartridge's games to Steam when it is plugged in and hides them when

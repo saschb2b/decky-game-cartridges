@@ -12,8 +12,8 @@ import {
   showModal,
 } from "@decky/ui";
 import { FC } from "react";
-import { GameModal, SteamGameModal } from "./modals";
-import { NON_STEAM, overview } from "./steam";
+import { GameModal } from "./modals";
+import { isListed } from "./steam";
 import { currentState } from "./store";
 
 const KEY = "game-cartridges-entry";
@@ -23,16 +23,11 @@ function actionFor(appid: number): (() => void) | null {
   const state = currentState();
   if (!state) return null;
   const cart = state.cartridges.find((c) => c.games.some((g) => g.appid === appid));
-  if (cart) {
-    const game = cart.games.find((g) => g.appid === appid)!;
-    return () => showModal(<GameModal gameId={game.id} />);
-  }
-  const app = overview(appid);
-  const plugged = state.cartridges.some((c) => !c.home && c.exists);
-  if (app && app.app_type !== NON_STEAM && app.installed && plugged) {
-    return () => showModal(<SteamGameModal appid={appid} />);
-  }
-  return null;
+  const game = cart?.games.find((g) => g.appid === appid);
+  if (!cart || !game || !isListed(game)) return null;
+  // A Steam game on this machine has nowhere to go until a cartridge is plugged in.
+  if (game.kind === "steam" && cart.home && !state.cartridges.some((c) => !c.home && c.exists)) return null;
+  return () => showModal(<GameModal gameId={game.id} from={cart.mount} />);
 }
 
 function splice(children: any[], appid: number) {

@@ -14,5 +14,9 @@ ssh "${SSH_OPTS[@]}" "$HOST" 'mkdir -p ~/.cache/game-cartridges-dev'
 scp -q "${SSH_OPTS[@]}" out/game-cartridges.zip "$HOST:.cache/game-cartridges-dev/"
 home=$(ssh "${SSH_OPTS[@]}" "$HOST" 'echo $HOME')
 node tools/deck.mjs eval SharedJSContext "DeckyBackend.call('utilities/install_plugin', 'file://$home/.cache/game-cartridges-dev/game-cartridges.zip', 'Game Cartridges', '$version', '$sha', 0).then(() => 'requested')"
-sleep 2
-node tools/deck.mjs eval Big-Picture '(() => { const b = Array.from(document.querySelectorAll("button.DialogButton")).find(e => /^(Install|Installieren|Reinstall|Neu installieren|Update|Aktualisieren)/.test(e.textContent.trim())); if (!b) return Array.from(document.querySelectorAll("button.DialogButton")).map(e => e.textContent.trim()); b.click(); return "confirmed: " + b.textContent.trim(); })()'
+# Decky shows its confirmation after a moment; press it as soon as it is there.
+for _ in $(seq 1 10); do
+    sleep 1.5
+    result=$(node tools/deck.mjs eval Big-Picture '(() => { const b = Array.from(document.querySelectorAll("button.DialogButton")).find(e => /^(Install|Installieren|Reinstall|Neu installieren|Update|Aktualisieren)/.test(e.textContent.trim())); if (!b) return ""; b.click(); return "confirmed: " + b.textContent.trim(); })()')
+    case $result in *confirmed*) echo "$result"; break ;; esac
+done

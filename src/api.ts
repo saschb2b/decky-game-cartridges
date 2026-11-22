@@ -1,14 +1,19 @@
 import { callable } from "@decky/api";
 
 export type Game = {
+  /** The id from cartridge.json, or "steam:<appid>" for a Steam game. */
   id: string;
+  /** "cartridge": games/<id> with its launch.sh. "steam": installed in a Steam library on that drive. */
+  kind: "cartridge" | "steam";
   title: string;
-  launch: string;
+  launch: string | null;
   present: boolean;
   size: number | null;
   appid: number | null;
-  /** The game's Steam shortcut points at this copy and is shown. */
+  /** The game's Steam shortcut points at this copy and is shown (always true for Steam games). */
   active: boolean;
+  /** The Steam library folder a Steam game is installed in. */
+  library: string | null;
 };
 
 export type Cartridge = {
@@ -64,6 +69,8 @@ export type Job = {
   total: number;
   /** Bytes per second while copying. */
   rate: number | null;
+  /** Progress in percent when bytes are unknown (Steam's own moves). */
+  percent?: number;
   /** The game (or new cartridge name), and where from / to. */
   subject?: string;
   src_name?: string;

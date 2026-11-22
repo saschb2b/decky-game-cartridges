@@ -185,6 +185,98 @@ def describe_drive(disk):
             "token": drive_token(disk)}
 
 
+# ---- Steam libraries ----------------------------------------------------------------------------------
+
+_VDF_TOKEN = re.compile(r'"((?:[^"\\]|\\.)*)"|([{}])|//[^\n]*')
+
+
+def parse_vdf(text):
+    """Steam's KeyValues text format (appmanifest_*.acf, libraryfolders.vdf) as nested dicts, keys lowercased."""
+    stack, key = [{}], None
+    for m in _VDF_TOKEN.finditer(text):
+        string, brace = m.group(1), m.group(2)
+        if brace == "{":
+            if key is None:
+                raise ValueError("a block without a name")
+            stack[-1][key] = {}
+            stack.append(stack[-1][key])
+            key = None
+        elif brace == "}":
+            if len(stack) == 1:
+                raise ValueError("unbalanced braces")
+            stack.pop()
+        elif string is not None:
+            string = string.replace('\\"', '"').replace("\\\\", "\\")
+            if key is None:
+                key = string.lower()
+            else:
+                stack[-1][key] = string
+                key = None
+    return stack[0]
+
+
+def steam_games(library):
+    """The Steam games installed in a library folder (the folder that holds steamapps/)."""
+    apps = os.path.join(library, "steamapps")
+    try:
+        names = sorted(os.listdir(apps))
+    except OSError:
+        return []
+    games = []
+    for name in names:
+        m = re.fullmatch(r"appmanifest_(\d+)\.acf", name)
+        if not m:
+            continue
+        try:
+            with open(os.path.join(apps, name), errors="replace") as f:
+                app = parse_vdf(f.read()).get("appstate") or {}
+            appid = int(app.get("appid") or m[1])
+            flags = int(app.get("stateflags") or 0)
+            size = int(app.get("sizeondisk") or 0)
+        except (OSError, ValueError):
+            continue
+        folder = os.path.join(apps, "common", app.get("installdir") or "")
+        games.append({"id": f"steam:{appid}", "kind": "steam", "title": app.get("name") or str(appid), "launch": None,
+                      "present": bool(flags & 4) and os.path.isdir(folder), "size": size or None, "appid": appid,
+                      "active": True, "library": library})
+    return games
+
+
+def steam_library_of(mp):
+    """The Steam library folder on a cartridge, or None."""
+    for path in (os.path.join(mp, "SteamLibrary"), mp):
+        if os.path.isdir(os.path.join(path, "steamapps")) or os.path.isfile(os.path.join(path, "libraryfolder.vdf")):
+            return path
+    return os.path.join(mp, "SteamLibrary") if os.path.isdir(os.path.join(mp, "SteamLibrary")) else None
+
+
+def machine_steam_libraries(cartridge_mounts):
+    """Steam library folders of this machine that are present and not on a cartridge (internal drive,
+    a Deck's microSD card)."""
+    for root in (HOME / ".local/share/Steam", HOME / ".steam/steam"):
+        if (root / "steamapps").is_dir():
+            break
+    else:
+        return []
+    data = {}
+    for vdf in (root / "steamapps" / "libraryfolders.vdf", root / "config" / "libraryfolders.vdf"):
+        try:
+            data = parse_vdf(vdf.read_text(errors="replace")).get("libraryfolders") or {}
+            break
+        except (OSError, ValueError):
+            continue
+    paths = [str(root)] + [v["path"] for v in data.values() if isinstance(v, dict) and v.get("path")]
+    carts = [os.path.realpath(mp) + os.sep for mp in cartridge_mounts]
+    out = []
+    for path in paths:
+        real = os.path.realpath(path)
+        if real in out or any((real + os.sep).startswith(c) for c in carts):
+            continue
+        if os.path.isdir(os.path.join(real, "steamapps")):
+            out.append(real)
+    return out
+
+
 # ---- cartridges ---------------------------------------------------------------------------------------
 
 def is_deck():
@@ -230,7 +322,9 @@ async def _measure(key):
         _sizing.discard(key)
 
 
-def cartridge_info(mp, devices, shortcuts, home=False):
+def cartridge_info(mp, devices, shortcuts, home=False, libraries=()):
+    """A cartridge (or the home cartridge) and its games: cartridge games from the manifest, then the Steam
+    games in its Steam library (for the home cartridge: in the machine's own Steam libraries)."""
     manifest = read_json(os.path.join(mp, "cartridge.json"), {}) or {}
     existing = Path(mp)
     while not existing.is_dir() and existing != existing.parent:
@@ -247,9 +341,9 @@ def cartridge_info(mp, devices, shortcuts, home=False):
         path = os.path.realpath(os.path.join(mp, cover))
         if path.startswith(os.path.realpath(mp) + os.sep) and os.path.isfile(path):
             info["cover"] = f"{cover}?{int(os.path.getmtime(path))}"
-    for lib in ("SteamLibrary", "steamapps"):
-        if os.path.isdir(os.path.join(mp, lib)):
-            info["steam_library"] = os.path.join(mp, "SteamLibrary") if lib == "SteamLibrary" else str(mp)
+    if not home:
+        info["steam_library"] = steam_library_of(mp)
+        libraries = [info["steam_library"]] if info["steam_library"] else []
     if not home:
         source = next((src for m, src in mounts() if m == str(mp)), None)
         disk = disk_of(devices, source) if source else None
@@ -261,23 +355,24 @@ def cartridge_info(mp, devices, shortcuts, home=False):
         folder = os.path.join(mp, "games", gid)
         sc = shortcuts.get(gid) or {}
         here = sc.get("exe") == os.path.realpath(os.path.join(mp, launch))
-        info["games"].append({"id": gid, "title": str(game.get("title") or gid), "launch": launch,
+        info["games"].append({"id": gid, "kind": "cartridge", "title": str(game.get("title") or gid), "launch": launch,
                               "present": os.path.isfile(os.path.join(mp, launch)),
                               "size": game_size(folder) if os.path.isdir(folder) else None,
-                              "appid": sc.get("appid"), "active": here and not sc.get("hidden")})
+                              "appid": sc.get("appid"), "active": here and not sc.get("hidden"), "library": None})
+    for library in libraries:
+        info["games"].extend(steam_games(library))
     return info
 
 
 async def all_cartridges(devices=None):
     devices = devices if devices is not None else await lsblk()
     shortcuts = agent_shortcuts()
-    carts = [cartridge_info(str(HOME_CART), devices, shortcuts, home=True)]
-    seen = set()
+    plugged = []
     for mp, _ in mounts():
-        if mp.startswith(MOUNT_ROOTS) and mp not in seen and is_cartridge_mount(mp):
-            seen.add(mp)
-            carts.append(cartridge_info(mp, devices, shortcuts))
-    return carts
+        if mp.startswith(MOUNT_ROOTS) and mp not in plugged and is_cartridge_mount(mp):
+            plugged.append(mp)
+    home = cartridge_info(str(HOME_CART), devices, shortcuts, home=True, libraries=machine_steam_libraries(plugged))
+    return [home] + [cartridge_info(mp, devices, shortcuts) for mp in plugged]
 
 
 def find_cartridge(carts, mount):
@@ -616,6 +711,13 @@ class Plugin:
                 parts.append(f"{path}|{path.stat().st_mtime_ns}")
             except OSError:
                 pass
+        plugged = [mp for mp, _ in mounts() if mp.startswith(MOUNT_ROOTS) and is_cartridge_mount(mp)]
+        libraries = machine_steam_libraries(plugged) + [lib for lib in map(steam_library_of, plugged) if lib]
+        for lib in libraries:
+            try:
+                parts.append(f"{lib}|{os.stat(os.path.join(lib, 'steamapps')).st_mtime_ns}")
+            except OSError:
+                pass
         parts.extend(f"{j.id}|{j.state}" for j in JOBS)
         return hashlib.sha1("\n".join(parts).encode()).hexdigest()
 
@@ -714,10 +816,14 @@ class Plugin:
         return True
 
     async def set_steam_library(self, mount):
-        """Creates the SteamLibrary folder on a cartridge (the frontend then adds it in Steam)."""
-        find_cartridge(await all_cartridges(), mount)
-        path = os.path.join(mount, "SteamLibrary")
+        """Creates the SteamLibrary folder on a cartridge. The agent adds it to Steam (and removes it again
+        when the cartridge is unplugged)."""
+        cart = find_cartridge(await all_cartridges(), mount)
+        if cart["home"]:
+            raise RuntimeError("Steam games on this machine stay in Steam's own libraries")
+        path = cart["steam_library"] or os.path.join(mount, "SteamLibrary")
         await worker("mkdir", path)
+        await poke_agent()
         return path
 
     async def eject(self, mount, close_programs=False):

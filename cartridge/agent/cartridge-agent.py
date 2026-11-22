@@ -12,7 +12,11 @@ cartridge, ~/Games/HomeCartridge) its shortcut follows it and keeps its app id, 
 controller layout. When a game is on several plugged-in cartridges, the home copy wins, then the copy
 the shortcut already points at.
 
-State (game id -> shortcut): ~/.local/share/game-cartridges/agent-state.json
+Steam's own games can live on a cartridge too, in a Steam library folder (SteamLibrary/). Steam manages
+them; the agent only adds that folder to Steam while the cartridge is plugged in and removes it when the
+cartridge is gone, so they show as installed exactly while the cartridge is there.
+
+State (game id -> shortcut, Steam library folders the agent added): ~/.local/share/game-cartridges/agent-state.json
 Log: journalctl --user -u game-cartridges
 Re-reads the manifests every 3 s; `kill -USR1 <pid>` (the Decky plugin does this) checks right away.
 """
@@ -26,7 +30,7 @@ import sys
 import time
 import urllib.request
 
-AGENT_VERSION = 2
+AGENT_VERSION = 3
 DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "game-cartridges")
 STATE_FILE = os.path.join(DATA, "agent-state.json")
 HOME_CARTRIDGE = os.path.expanduser("~/Games/HomeCartridge")
@@ -113,6 +117,18 @@ def wanted_shortcuts(state):
         current = state["shortcuts"].get(gid, {}).get("exe")
         wanted[gid] = next((g for g in found if g["mount"] == HOME_CARTRIDGE), None) \
             or next((g for g in found if g["exe"] == current), found[0])
+    return wanted
+
+
+def wanted_libraries():
+    """{path: {cartridge, label}} for the Steam library folder (SteamLibrary/) of every mounted cartridge.
+    Steam manages the games in it; the agent only adds the folder to Steam while the cartridge is plugged in."""
+    wanted = {}
+    for mp in sorted(mount_points()):
+        manifest = read_manifest(mp)
+        path = os.path.join(mp, "SteamLibrary")
+        if manifest and os.path.isdir(path):
+            wanted[path] = {"cartridge": manifest["id"], "label": manifest["name"] or os.path.basename(mp)}
     return wanted
 
 
@@ -229,6 +245,44 @@ JS_READY = "typeof SteamClient !== 'undefined' && typeof appStore !== 'undefined
 JS_EXISTS = "(id => !!appStore.GetAppOverviewByAppID(id))({appid})"
 JS_HIDDEN = "collectionStore.BIsHidden({appid})"
 JS_SET_HIDDEN = "collectionStore.SetAppsAsHidden([{appid}], {hidden})"
+JS_FOLDERS = ("SteamClient.InstallFolder.GetInstallFolders().then(fs => fs.map(f => "
+              "({index: f.nFolderIndex, path: f.strFolderPath, mounted: f.bIsMounted, label: f.strUserLabel})))")
+
+
+def sync_libraries(steam, state, wanted):
+    """Steam's library folders follow the cartridges: a plugged-in cartridge's SteamLibrary/ is added (its
+    games show as installed), and removed again once the cartridge is gone (they show as not installed).
+    Returns True when nothing is left to do."""
+    libs = state.setdefault("libraries", {})
+    folders = {os.path.normpath(f["path"]): f for f in steam.eval(JS_FOLDERS) or []}
+    for path, info in sorted(wanted.items()):
+        folder = folders.get(os.path.normpath(path))
+        if not folder:
+            index = steam.eval(f"SteamClient.InstallFolder.AddInstallFolder({json.dumps(path)})")
+            if not isinstance(index, int) or index < 0:
+                raise RuntimeError(f"Steam did not add the library {path} ({index!r})")
+            steam.eval(f"SteamClient.InstallFolder.SetFolderLabel({index}, {json.dumps(info['label'])})")
+            log(f"added Steam library {path} of cartridge {info['cartridge']}")
+        elif folder["label"] != info["label"]:
+            steam.eval(f"SteamClient.InstallFolder.SetFolderLabel({folder['index']}, {json.dumps(info['label'])})")
+        if libs.get(path) != info:
+            libs[path] = info
+            save_state(state)
+    done = True
+    for path in sorted(set(libs) - set(wanted)):
+        folder = folders.get(os.path.normpath(path))
+        if folder and os.path.isdir(path):
+            folder = None  # still there (the manifest went unreadable): leave Steam's entry alone
+        elif folder and folder["mounted"]:
+            steam.eval("SteamClient.InstallFolder.RefreshFolders()")  # Steam has not noticed the unplug yet
+            done = False
+            continue
+        elif folder:
+            steam.eval(f"SteamClient.InstallFolder.RemoveInstallFolder({folder['index']})")
+            log(f"removed Steam library {path}: cartridge {libs[path]['cartridge']} is unplugged")
+        del libs[path]
+        save_state(state)
+    return done
 
 
 def js_add(game):
@@ -304,13 +358,18 @@ def _in_sync(state, wanted):
     return not state.get("orphans") and all(entry.get("hidden") for key, entry in have.items() if key not in wanted)
 
 
+def _libraries_in_sync(state, wanted):
+    return set(state.get("libraries", {})) == set(wanted)
+
+
 def reconcile(state):
     """Make Steam match the mounted cartridges: their games shown, games of absent cartridges hidden.
     Hiding (not deleting) keeps each game's Steam entry, play time and settings for the next time the
     cartridge is plugged in. Returns True when nothing is left to do."""
     wanted = wanted_shortcuts(state)
+    libraries = wanted_libraries()
     have = state["shortcuts"]
-    if _in_sync(state, wanted) and not state.get("verify"):
+    if _in_sync(state, wanted) and _libraries_in_sync(state, libraries) and not state.get("verify"):
         return True
     try:
         steam = Steam()
@@ -357,6 +416,8 @@ def reconcile(state):
             have[key] = {"appid": appid, "title": game["title"], "exe": game["exe"], "cartridge": game["cartridge"],
                          "hidden": False}
             save_state(state)
+        if not sync_libraries(steam, state, libraries):
+            return False
         state.pop("verify", None)
         save_state(state)
         global _last_wait

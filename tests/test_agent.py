@@ -77,3 +77,66 @@ def test_in_sync(agent):
     assert not agent._in_sync({"shortcuts": {"oot": dict(shown, exe="/other.sh")}}, wanted)
     assert not agent._in_sync({"shortcuts": {"oot": shown, "old": {"exe": "/x", "title": "X"}}}, wanted)
     assert not agent._in_sync({"shortcuts": {"oot": shown}, "orphans": [5]}, wanted)
+
+
+class FakeSteam:
+    """Steam's library folder calls, as the agent sends them."""
+
+    def __init__(self, agent, folders):
+        self.agent = agent
+        self.folders = folders  # [{index, path, mounted, label}]
+        self.calls = []
+
+    def eval(self, js):
+        self.calls.append(js)
+        if js == self.agent.JS_FOLDERS:
+            return [dict(f) for f in self.folders]
+        if js.startswith("SteamClient.InstallFolder.AddInstallFolder("):
+            path = json.loads(js[js.index("(") + 1:-1])
+            index = max([f["index"] for f in self.folders] + [0]) + 1
+            self.folders.append({"index": index, "path": path, "mounted": True, "label": ""})
+            return index
+        if js.startswith("SteamClient.InstallFolder.SetFolderLabel("):
+            index, label = js[js.index("(") + 1:-1].split(", ", 1)
+            next(f for f in self.folders if f["index"] == int(index))["label"] = json.loads(label)
+            return None
+        if js.startswith("SteamClient.InstallFolder.RemoveInstallFolder("):
+            index = int(js[js.index("(") + 1:-1])
+            self.folders = [f for f in self.folders if f["index"] != index or f["mounted"]]
+            return None
+        if js == "SteamClient.InstallFolder.RefreshFolders()":
+            return None
+        raise AssertionError(js)
+
+
+def test_cartridge_steam_library_follows_the_cartridge(agent, tmp_path, monkeypatch):
+    monkeypatch.setattr(agent, "save_state", lambda state: None)
+    cart = make_cartridge(tmp_path / "Zelda", "zelda", ["oot"], name="Zelda")
+    (cart / "SteamLibrary").mkdir()
+    bare = make_cartridge(tmp_path / "Bare", "bare", ["x"])
+    monkeypatch.setattr(agent, "mount_points", lambda: [str(cart), str(bare)])
+    wanted = agent.wanted_libraries()
+    library = str(cart / "SteamLibrary")
+    assert wanted == {library: {"cartridge": "zelda", "label": "Zelda"}}
+
+    steam = FakeSteam(agent, [{"index": 0, "path": "/home/me/.local/share/Steam", "mounted": True, "label": ""}])
+    state = {"shortcuts": {}}
+    assert agent.sync_libraries(steam, state, wanted)
+    assert [f["path"] for f in steam.folders] == ["/home/me/.local/share/Steam", library]
+    assert steam.folders[1]["label"] == "Zelda"
+    assert state["libraries"] == wanted
+    assert agent._libraries_in_sync(state, wanted)
+
+    # Plugged in again: nothing is added twice.
+    assert agent.sync_libraries(steam, state, wanted)
+    assert len(steam.folders) == 2
+
+    # Unplugged: Steam first still reports the folder as mounted, then not; then it is removed.
+    (cart / "SteamLibrary").rmdir()
+    assert not agent._libraries_in_sync(state, {})
+    assert not agent.sync_libraries(steam, state, {})
+    assert len(steam.folders) == 2 and library in state["libraries"]
+    steam.folders[1]["mounted"] = False
+    assert agent.sync_libraries(steam, state, {})
+    assert [f["index"] for f in steam.folders] == [0]
+    assert state["libraries"] == {}
