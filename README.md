@@ -14,7 +14,7 @@ The machine's internal storage appears the same way, as **This PC** (or **This D
 Steam games installed on it.
 
 <p>
-  <img src="docs/screenshots/panel.jpg" width="49%" alt="The plugin in the Quick Access menu: the Zelda cartridge with six games, and This PC">
+  <img src="docs/screenshots/panel.jpg" width="49%" alt="The plugin in the Quick Access menu: the Zelda cartridge's games, and This PC with its Steam games">
   <img src="docs/screenshots/copying.jpg" width="49%" alt="A game being copied from the cartridge to This PC, with speed and time left">
 </p>
 
